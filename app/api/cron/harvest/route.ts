@@ -16,7 +16,9 @@ import { aiHealth } from '@/lib/ai/router';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export const maxDuration = 300;
+// 60s je maksimum koji prolazi na SVAKOM Vercel planu (Hobby uključen).
+// Ova ruta ionako samo prosleđuje posao workeru — ne skrejpuje sama.
+export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
   const denied = requireCronSecret(request);

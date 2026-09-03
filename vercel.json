@@ -5,11 +5,11 @@
   "crons": [
     {
       "path": "/api/cron/harvest",
-      "schedule": "0 9,13,17 * * *"
+      "schedule": "0 9 * * *"
     }
   ],
   "functions": {
-    "app/api/pipeline/run/route.ts": { "maxDuration": 300 },
-    "app/api/cron/harvest/route.ts": { "maxDuration": 300 }
+    "app/api/pipeline/run/route.ts": { "maxDuration": 60 },
+    "app/api/cron/harvest/route.ts": { "maxDuration": 60 }
   }
 }

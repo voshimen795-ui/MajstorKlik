@@ -284,11 +284,36 @@ vercel env add GROQ_API_KEY           # …i ostale iz .env.example
 vercel --prod
 ```
 
-`vercel.json` već ima cron na 9h, 13h i 17h. Cron **ne skrejpuje sam** — prosleđuje
+`vercel.json` ima cron jednom dnevno u 9h. Cron **ne skrejpuje sam** — prosleđuje
 posao workeru na `WORKER_URL`, jer Vercel nema Chromium.
 
 > Obavezno postavi `API_TOKEN` i `CRON_SECRET` (`openssl rand -hex 32`).
 > Bez njih ti bilo ko može isprazniti AI kvotu ili pročitati bazu leadova.
+
+#### Ograničenja besplatnog (Hobby) plana — i kako ih zaobići
+
+Vercel Hobby ima dva ograničenja koja **obaraju deploy** ako ih prekršiš:
+
+| Ograničenje | Šta pada | Kako je rešeno ovde |
+|---|---|---|
+| cron sme **samo jednom dnevno** | `Hobby accounts are limited to daily cron jobs` | `vercel.json` ima `0 9 * * *` — tačno jednom |
+| funkcija traje **najviše 60s** | `maxDuration exceeds the limit for your plan` | sve rute imaju `maxDuration = 60` |
+| tajming nije precizan | — | posao je svejedno asinhron, minut-dva ne menja ništa |
+
+**Ovo praktično ne smeta**, jer Vercel cron nije motor mašine nego samo okidač.
+Pravi raspored živi u workeru (`scripts/worker.ts`): on sam vrti ture svakih
+45-120 minuta ceo dan, i **potpuno je nezavisan od Vercel crona**. Vercel cron je tu
+samo kao rezervni okidač.
+
+Ako ipak hoćeš više okidanja dnevno bez plaćanja Pro plana, imaš dve besplatne opcije:
+
+1. **Spoljni cron servis** (npr. cron-job.org, UptimeRobot) koji zove tvoj endpoint
+   koliko god puta hoćeš — Hobby limit se odnosi samo na Vercel-ov ugrađeni cron:
+   ```
+   GET https://tvoj-sajt.vercel.app/api/cron/harvest?token=CRON_SECRET
+   ```
+2. **Pusti worker da radi svoje** i potpuno izbaci `crons` iz `vercel.json`.
+   Ovo je i preporučena varijanta — jedan izvor istine za raspored.
 
 ### B) Railway — worker koji skrejpuje (besplatan kredit)
 
@@ -394,6 +419,8 @@ uključi tek kad si proverio uslove konkretnog sajta i svesno prihvatio rizik.
 | `van premium zona` masovno | Maps ignoriše anker | proveri koordinate zone u `zones.ts` |
 | Sve odbačeno kao nizak skor | prag previsok | spusti `MIN_LEAD_SCORE` na 45 |
 | Chromium ne startuje na serveru | fale sistemske biblioteke | koristi `Dockerfile.worker` (Playwright slika) |
+| `Hobby accounts are limited to daily cron jobs` | cron češći od 1×/dan | `vercel.json` → `0 9 * * *`, ili izbaci `crons` i pusti worker |
+| `maxDuration exceeds the limit for your plan` | funkcija duža od 60s | `maxDuration = 60` u rutama (već podešeno) |
 | `duplicate key phone_e164` | dva workera paralelno | to je zaštita, ne greška — upsert to hvata |
 | Poruke zvuče kao robot | AI pao na fallback | proveri `ai_provider` polje leada |
 

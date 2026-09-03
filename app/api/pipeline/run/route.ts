@@ -18,7 +18,9 @@ import type { Craft } from '@/lib/config/categories';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export const maxDuration = 300;
+// 60s prolazi na svakom planu. Na Vercel-u ova ruta samo prosleđuje posao;
+// kad radi lokalno (RUN_SCRAPER_HERE=true na Railway/Render/VPS) limit ne važi.
+export const maxDuration = 60;
 
 const CRAFTS: Craft[] = ['vodoinstalater', 'gipsar', 'moler'];
 
