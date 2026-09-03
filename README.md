@@ -85,6 +85,11 @@ spremnu za slanje na WhatsApp u jednom kliku.
 
 ## 2. Brzi start — 15 minuta
 
+> **Najkraći mogući put — bez Supabase-a i bez hostinga.** Treba ti samo jedan
+> AI ključ. Posle ture dobijaš `export/leads-*.html`: samostalan fajl koji
+> pošalješ sebi na telefon, otvoriš i kucaš WhatsApp dugmad. Bazu podesiš
+> kasnije, kad ti zatreba dedupe (da isti čovek ne dobije poruku dvaput).
+
 ```bash
 # 1. zavisnosti + Chromium
 npm install

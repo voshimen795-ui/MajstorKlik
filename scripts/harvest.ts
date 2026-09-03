@@ -123,7 +123,11 @@ async function main(): Promise<void> {
         );
         console.log(`\nPrimer poruke (${report.topLeads[0]!.client_name}):\n"${report.topLeads[0]!.cold_pitch_message}"\n`);
       }
-      if (report.jsonPath) console.log(`JSON: ${report.jsonPath}`);
+      if (report.htmlPath) {
+        console.log(`\n📱 OTVORI OVO NA TELEFONU (pošalji sebi fajl na WhatsApp/mejl):`);
+        console.log(`   ${report.htmlPath}`);
+      }
+      if (report.jsonPath) console.log(`   JSON (za dalju obradu): ${report.jsonPath}`);
     } catch (error) {
       console.error(`Posao pao (${job.category}/${job.rich_zone}):`, error);
     }

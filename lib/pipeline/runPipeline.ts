@@ -16,6 +16,7 @@ import type { Craft } from '../config/categories';
 import type { LeadRecord, RawLead } from '../types/lead';
 import { createLogger } from '../utils/logger';
 import { createDeadline, defaultBudgetMs } from '../utils/deadline';
+import { renderLeadsHtml } from './exportHtml';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -60,6 +61,8 @@ export interface PipelineReport {
   /** Posao prekinut zbog vremenskog budžeta — nije greška, samo kraća tura. */
   stoppedEarly: boolean;
   jsonPath?: string;
+  /** Samostalan HTML — otvoriš ga na telefonu i kucaš WhatsApp dugmad. */
+  htmlPath?: string;
 }
 
 export async function runPipeline(params: PipelineParams): Promise<PipelineReport> {
@@ -121,12 +124,27 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineRepor
     log.warn(params.dryRun ? 'dry-run: preskačem upis' : 'Supabase nije podešen: preskačem upis');
   }
 
-  // --- 4. JSON izvoz (rezerva kad nema baze) ---
+  // --- 4. Izvoz: JSON (za dalju obradu) + HTML (za rad sa telefona) ---
   let jsonPath: string | undefined;
+  let htmlPath: string | undefined;
   const exportDir = params.exportJsonDir ?? process.env.EXPORT_DIR;
   if (exportDir && leads.length > 0) {
-    jsonPath = await exportJson(exportDir, params.category, zoneId, leads);
-    log.info('rezultat izvezen', { jsonPath });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const base = `leads-${params.category}-${zoneId}-${stamp}`;
+
+    jsonPath = await writeExport(exportDir, `${base}.json`, JSON.stringify(leads, null, 2));
+    htmlPath = await writeExport(
+      exportDir,
+      `${base}.html`,
+      renderLeadsHtml(leads, {
+        craft: params.category,
+        zoneLabel: zone.label,
+        generatedAt: new Date(),
+        rawFound: scrapeResult.leads.length,
+        rejected: rejected.length,
+      }),
+    );
+    log.info('rezultat izvezen', { jsonPath, htmlPath });
   }
 
   const durationMs = Date.now() - startedAt;
@@ -163,6 +181,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineRepor
     errors: scrapeResult.errors,
     stoppedEarly: scrapeResult.stoppedEarly || skippedForTime > 0,
     ...(jsonPath ? { jsonPath } : {}),
+    ...(htmlPath ? { htmlPath } : {}),
   };
 
   log.info('=== PIPELINE ZAVRŠEN ===', {
@@ -194,11 +213,10 @@ export async function qualifyOnly(
   return { leads, inserted: result.inserted.length, duplicates: result.duplicates.length, rejected };
 }
 
-async function exportJson(dir: string, craft: Craft, zoneId: string, leads: LeadRecord[]): Promise<string> {
+async function writeExport(dir: string, fileName: string, content: string): Promise<string> {
   await fs.mkdir(dir, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const file = path.join(dir, `leads-${craft}-${zoneId}-${stamp}.json`);
-  await fs.writeFile(file, JSON.stringify(leads, null, 2), 'utf8');
+  const file = path.join(dir, fileName);
+  await fs.writeFile(file, content, 'utf8');
   return file;
 }
 
