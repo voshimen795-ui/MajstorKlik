@@ -1,0 +1,35 @@
+{
+  "name": "majstorklik-leadgen",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MajstorKlik Lead Generation Machine — multi-AI pipeline za gipsare, vodoinstalatere i molere u premium zonama Beograda",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p ${PORT:-3000}",
+    "typecheck": "tsc --noEmit",
+    "harvest": "tsx scripts/harvest.ts",
+    "harvest:loop": "tsx scripts/worker.ts",
+    "phone:test": "tsx scripts/testPhones.ts",
+    "playwright:install": "playwright install --with-deps chromium"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^17.4.2",
+    "next": "14.2.15",
+    "playwright": "^1.48.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "tsx": "^4.19.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

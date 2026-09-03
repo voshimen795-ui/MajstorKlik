@@ -1,0 +1,40 @@
+# Render — besplatna instanca za worker koji skrejpuje.
+#
+# Napomena o besplatnom planu: Render gasi neaktivne web servise posle 15 min.
+# Zato je worker tipa `worker` (nema HTTP port, ne gasi se zbog neaktivnosti),
+# a ako ti treba i HTTP endpoint, dodaj drugi servis tipa `web`.
+
+services:
+  - type: worker
+    name: majstorklik-harvester
+    runtime: docker
+    dockerfilePath: ./Dockerfile.worker
+    plan: free
+    region: frankfurt
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RUN_SCRAPER_HERE
+        value: 'true'
+      - key: SCRAPER_HEADLESS
+        value: 'true'
+      - key: WORKER_ACTIVE_FROM_HOUR
+        value: '8'
+      - key: WORKER_ACTIVE_TO_HOUR
+        value: '22'
+      - key: TZ
+        value: Europe/Belgrade
+      # Tajne se unose u Render dashboardu (Environment -> Add Secret File / Env Var)
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: MIN_LEAD_SCORE
+        value: '55'
