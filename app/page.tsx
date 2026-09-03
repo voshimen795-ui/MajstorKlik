@@ -8,6 +8,7 @@
 import { Suspense } from 'react';
 import { LeadCard } from '@/components/LeadCard';
 import { LeadFilters } from '@/components/LeadFilters';
+import { RunPipeline } from '@/components/RunPipeline';
 import { leadStats, listLeads } from '@/lib/db/leads';
 import { isDbConfigured } from '@/lib/db/supabase';
 import { configuredProviders } from '@/lib/ai/router';
@@ -93,6 +94,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             <b>{leads.length}</b>
           </div>
         </section>
+
+        <RunPipeline />
 
         <Suspense fallback={<div className="muted">Učitavanje filtera…</div>}>
           <LeadFilters />

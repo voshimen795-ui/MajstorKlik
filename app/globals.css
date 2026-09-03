@@ -147,6 +147,29 @@ a { color: inherit; }
 .section-title { font-size: .76rem; text-transform: uppercase; letter-spacing: .09em; color: var(--slate-400); font-weight: 700; margin: 24px 0 10px; }
 .muted { color: var(--ink-muted); font-size: .85rem; }
 
+/* ---------- pokretanje ture ---------- */
+.runbar {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 12px 14px; margin-bottom: 14px; box-shadow: var(--e-1);
+}
+.runbar select {
+  font-family: inherit; font-size: .86rem; padding: 9px 11px;
+  border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--white); color: var(--ink);
+}
+.btn-run {
+  background: var(--accent-500); border-color: var(--accent-500); color: #3a1400; font-weight: 800;
+}
+.btn-run:disabled { background: var(--slate-300); border-color: var(--slate-300); color: var(--slate-600); }
+.runmsg { flex-basis: 100%; font-size: .84rem; padding: 9px 12px; border-radius: var(--r-sm); margin-top: 4px; }
+.runmsg-ok { background: var(--success-bg); color: var(--success); }
+.runmsg-greska { background: var(--danger-bg); color: var(--danger); }
+.runmsg-info { background: var(--navy-50); color: var(--navy-600); }
+
+@media (max-width: 560px) {
+  .runbar select, .runbar .btn-run { flex: 1 1 100%; }
+}
+
 /* ---------- setup / dijagnostika okruženja ---------- */
 .setup { text-align: left; }
 .setup h2, .setup > .muted { text-align: center; }
