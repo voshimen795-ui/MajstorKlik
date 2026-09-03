@@ -1,0 +1,24 @@
+# Worker slika za Railway / Render / bilo koji Docker host.
+#
+# Koristi zvaničnu Playwright sliku — u njoj su Chromium i SVE sistemske
+# biblioteke koje mu trebaju. Ručno instaliranje tih ~40 .deb paketa je
+# najčešći razlog zašto skreper radi lokalno a puca na serveru.
+
+FROM mcr.microsoft.com/playwright:v1.48.0-jammy
+
+ENV NODE_ENV=production \
+    TZ=Europe/Belgrade \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    SCRAPER_HEADLESS=true \
+    RUN_SCRAPER_HERE=true
+
+WORKDIR /app
+
+# Prvo samo manifest — sloj sa zavisnostima se kešira između deploy-a.
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev --no-audit --no-fund || npm install --omit=dev --no-audit --no-fund
+
+COPY . .
+
+# Worker ne servira HTTP — samo vrti ture prikupljanja.
+CMD ["npx", "tsx", "scripts/worker.ts"]
