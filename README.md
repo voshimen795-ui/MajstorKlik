@@ -74,9 +74,12 @@ spremnu za slanje na WhatsApp u jednom kliku.
 
 | Gde | Šta radi | Zašto tu |
 |---|---|---|
-| **Vercel** | sajt, dashboard, API, cron okidač | besplatno, brzo, ali **nema Chromium** i seče funkcije na 10-60s |
-| **Railway / Render** | worker koji skrejpuje | ima Docker sa Chromium-om, proces može da radi 20 minuta |
+| **Vercel Pro** | sajt, dashboard, API, cron **i skreper** | 300s po funkciji + Chromium preko `@sparticuz/chromium` |
+| **Railway / Render** *(opciono)* | worker za duge ture | bez vremenskog limita, drugačiji IP opseg |
 | **Supabase** | baza leadova | besplatnih 500 MB ≈ pola miliona leadova |
+
+> Na Hobby planu Vercel ne može da skrejpuje (60s i bez Chromium-a) — tamo je
+> worker obavezan. Sa Pro planom je opcion.
 
 ---
 
@@ -214,6 +217,8 @@ npm run harvest -- --ping                            # samo provera AI provajder
 
 npm run harvest:loop                                 # kontinualni worker
 npm run phone:test                                   # test parsera telefona
+npm run stealth:test                                 # da li maska STVARNO radi u browseru
+SERVERLESS_CHROMIUM=true npm run stealth:test        # isto, ali Lambda Chromium (Vercel put)
 npm run typecheck
 ```
 
@@ -290,30 +295,49 @@ posao workeru na `WORKER_URL`, jer Vercel nema Chromium.
 > Obavezno postavi `API_TOKEN` i `CRON_SECRET` (`openssl rand -hex 32`).
 > Bez njih ti bilo ko može isprazniti AI kvotu ili pročitati bazu leadova.
 
-#### Ograničenja besplatnog (Hobby) plana — i kako ih zaobići
+#### Vercel Pro: cela mašina na jednom mestu
 
-Vercel Hobby ima dva ograničenja koja **obaraju deploy** ako ih prekršiš:
+Repo je podešen za **Pro plan**, što menja tri stvari:
 
-| Ograničenje | Šta pada | Kako je rešeno ovde |
+| | Hobby | Pro (podešeno ovde) |
 |---|---|---|
-| cron sme **samo jednom dnevno** | `Hobby accounts are limited to daily cron jobs` | `vercel.json` ima `0 9 * * *` — tačno jednom |
-| funkcija traje **najviše 60s** | `maxDuration exceeds the limit for your plan` | sve rute imaju `maxDuration = 60` |
-| tajming nije precizan | — | posao je svejedno asinhron, minut-dva ne menja ništa |
+| cron | 1× dnevno | **5× dnevno** (`0 8,11,14,17,20 * * *`) |
+| trajanje funkcije | 60s | **300s** |
+| memorija | 1024 MB | **3009 MB** |
+| skreper u funkciji | nemoguć | **moguć** (`SERVERLESS_CHROMIUM=true`) |
 
-**Ovo praktično ne smeta**, jer Vercel cron nije motor mašine nego samo okidač.
-Pravi raspored živi u workeru (`scripts/worker.ts`): on sam vrti ture svakih
-45-120 minuta ceo dan, i **potpuno je nezavisan od Vercel crona**. Vercel cron je tu
-samo kao rezervni okidač.
+Sa Pro planom ti **više ne treba Railway ni Render** — Chromium radi u samoj
+Vercel funkciji preko `@sparticuz/chromium` (Chromium spakovan za Lambdu,
+raspakuje se u `/tmp` pri prvom pozivu). Uključuje se jednom promenljivom:
 
-Ako ipak hoćeš više okidanja dnevno bez plaćanja Pro plana, imaš dve besplatne opcije:
+```bash
+vercel env add SERVERLESS_CHROMIUM   # vrednost: true
+```
 
-1. **Spoljni cron servis** (npr. cron-job.org, UptimeRobot) koji zove tvoj endpoint
-   koliko god puta hoćeš — Hobby limit se odnosi samo na Vercel-ov ugrađeni cron:
-   ```
-   GET https://tvoj-sajt.vercel.app/api/cron/harvest?token=CRON_SECRET
-   ```
-2. **Pusti worker da radi svoje** i potpuno izbaci `crons` iz `vercel.json`.
-   Ovo je i preporučena varijanta — jedan izvor istine za raspored.
+Posle deploya proveri da browser stvarno radi — **ne čekaj da cron tiho ne uradi ništa**:
+
+```bash
+curl "https://tvoj-sajt.vercel.app/api/health?browser=1" \
+  -H "Authorization: Bearer $API_TOKEN"
+# -> "browser": { "ok": true, "mode": "serverless", "ms": 3400, ... }
+```
+
+**Kako je vreme podeljeno.** Funkcija ima 300s, pa pipeline radi sa budžetom od
+280s: 70% skreper, 30% AI kvalifikacija. Kad budžet istekne, posao **staje sam** i
+uredno upiše ono što je skupio (`stoppedEarly: true` u izveštaju). Nikad ne biva
+ubijen nasred posla — jer tada bi se skrejpovani leadovi izgubili, a AI kvota
+bi već bila potrošena. Zato su ture u serverlessu kraće (12 rezultata po upitu,
+8 otvaranja) ali ih ima 5 dnevno — zbir je isti kao jedna duga tura.
+
+**Kada ipak zadržati worker (Railway/Render/lokalno):**
+
+- hoćeš duge ture bez ikakvog vremenskog limita (20+ minuta po zoni)
+- hoćeš pauze 45-120 min između tura, što je najbolja zaštita od blokade
+- kućni ili Railway IP je "čistiji" od Vercel/AWS opsega, koji Google češće gleda popreko
+
+Najbolje od oba: **worker vrti glavninu**, a Vercel cron radi kao rezerva i
+kao ručni okidač iz dashboarda. Ako imaš oba, `WORKER_URL` ima prednost samo
+kada `SERVERLESS_CHROMIUM` i `RUN_SCRAPER_HERE` nisu uključeni.
 
 ### B) Railway — worker koji skrejpuje (besplatan kredit)
 
@@ -352,10 +376,20 @@ Bez plaćenih proxija sve se svodi na tri stvari — i **treća je najvažnija**
 - `locale: sr-RS`, `timezoneId: Europe/Belgrade`, geolokacija Beograd
 - rotacija realnih Chrome UA + odgovarajući `Sec-Ch-Ua` headeri
 - `--disable-blink-features=AutomationControlled`
-- maskiranje: `navigator.webdriver`, `plugins`, `languages`, `window.chrome`,
-  `permissions.query`, WebGL vendor/renderer
+- maskiranje: `navigator.webdriver`, `plugins`, `mimeTypes`, `languages`,
+  `hardwareConcurrency`, `deviceMemory`, `window.chrome`, `permissions.query`,
+  WebGL vendor/renderer
 - keširanje kolačića pristanka (`.scraper-state/`) — pravi korisnik ne prihvata
   kolačiće 100 puta dnevno
+
+> **Zašto je stealth skripta pisana kao string, a ne kao funkcija.**
+> `addInitScript(fn)` šalje `fn.toString()` u browser. Kad kod prođe kroz
+> esbuild/tsx (a worker se pokreće baš tako), transpajler ubaci svoj helper
+> `__name(...)` u telo funkcije. Taj helper u browseru ne postoji → skripta
+> pukne sa `ReferenceError`, i to **tiho**, jer greška ide u konzolu stranice.
+> Posledica: maska ne radi uopšte, a ti to ne vidiš u logovima. Zato je skripta
+> string, svaka izmena ima svoj `try/catch`, i postoji `npm run stealth:test`
+> koji za 5 sekundi potvrdi da sve stvarno radi.
 
 **2. Ponašati se kao čovek**
 
@@ -419,8 +453,12 @@ uključi tek kad si proverio uslove konkretnog sajta i svesno prihvatio rizik.
 | `van premium zona` masovno | Maps ignoriše anker | proveri koordinate zone u `zones.ts` |
 | Sve odbačeno kao nizak skor | prag previsok | spusti `MIN_LEAD_SCORE` na 45 |
 | Chromium ne startuje na serveru | fale sistemske biblioteke | koristi `Dockerfile.worker` (Playwright slika) |
-| `Hobby accounts are limited to daily cron jobs` | cron češći od 1×/dan | `vercel.json` → `0 9 * * *`, ili izbaci `crons` i pusti worker |
-| `maxDuration exceeds the limit for your plan` | funkcija duža od 60s | `maxDuration = 60` u rutama (već podešeno) |
+| `Hobby accounts are limited to daily cron jobs` | cron češći od 1×/dan na Hobby planu | pređi na Pro, ili `vercel.json` → `0 9 * * *` |
+| `maxDuration exceeds the limit for your plan` | 300s traži Pro plan | na Hobby planu spusti na 60 u `vercel.json` i rutama |
+| Skreper radi lokalno, na Vercel-u vraća 501 | `SERVERLESS_CHROMIUM` nije uključen | `vercel env add SERVERLESS_CHROMIUM` → `true` |
+| `browser.ok: false` u `/api/health?browser=1` | funkcija nema dovoljno memorije | `memory: 3009` u `vercel.json` (već podešeno), pa redeploy |
+| Tura vrati manje leadova nego lokalno | `stoppedEarly: true` — istekao budžet | normalno u serverlessu; smanji `maxPerQuery` ili pusti worker |
+| Google blokira odmah, a lokalno ne | Vercel/AWS IP opseg je "prljaviji" | prebaci skreper na worker (Railway/Render/kućni računar) |
 | `duplicate key phone_e164` | dva workera paralelno | to je zaštita, ne greška — upsert to hvata |
 | Poruke zvuče kao robot | AI pao na fallback | proveri `ai_provider` polje leada |
 

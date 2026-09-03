@@ -15,6 +15,7 @@ import { RICH_ZONES, type RichZoneId } from '../config/zones';
 import type { Craft } from '../config/categories';
 import type { LeadRecord, RawLead } from '../types/lead';
 import { createLogger } from '../utils/logger';
+import { createDeadline, defaultBudgetMs } from '../utils/deadline';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -34,6 +35,12 @@ export interface PipelineParams {
   headless?: boolean;
   /** Snimi rezultat i u JSON fajl (korisno kad Supabase nije podešen). */
   exportJsonDir?: string;
+  /**
+   * Ukupan vremenski budžet (ms). Na Vercel Pro funkciji ~280.000.
+   * Deli se 70% skreper / 30% AI kvalifikacija — skreper je taj koji ume da
+   * pojede sve vreme, a kvalifikacija bez skrejpovanih podataka nema šta da radi.
+   */
+  timeBudgetMs?: number;
 }
 
 export interface PipelineReport {
@@ -50,6 +57,8 @@ export interface PipelineReport {
   topLeads: LeadRecord[];
   rejectedSample: { name: string; reason: string }[];
   errors: string[];
+  /** Posao prekinut zbog vremenskog budžeta — nije greška, samo kraća tura. */
+  stoppedEarly: boolean;
   jsonPath?: string;
 }
 
@@ -62,9 +71,16 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineRepor
   const zoneId = toZoneId(params.rich_zone);
   const zone = RICH_ZONES[zoneId];
 
-  log.info('=== POKRETANJE PIPELINE-A ===', { zanat: params.category, zona: zone.label });
+  const totalBudgetMs = params.timeBudgetMs ?? defaultBudgetMs();
+  const scrapeBudgetMs = totalBudgetMs ? Math.round(totalBudgetMs * 0.7) : undefined;
 
-  // --- 1. SKREPER ---
+  log.info('=== POKRETANJE PIPELINE-A ===', {
+    zanat: params.category,
+    zona: zone.label,
+    budžet_s: totalBudgetMs ? Math.round(totalBudgetMs / 1000) : 'bez ograničenja',
+  });
+
+  // --- 1. SKREPER (70% budžeta) ---
   const scrapeResult = await scrape({
     category: params.category,
     rich_zone: zoneId,
@@ -72,14 +88,17 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineRepor
     maxPerQuery: params.maxPerQuery,
     maxDetails: params.maxDetails,
     headless: params.headless,
+    timeBudgetMs: scrapeBudgetMs,
   });
 
   log.info(`skrejpovano ${scrapeResult.leads.length} sirovih unosa`, scrapeResult.bySource);
 
-  // --- 2. AI KVALIFIKACIJA ---
-  const { leads, rejected, usedFallbackCount } = await qualifyBatch(scrapeResult.leads, {
+  // --- 2. AI KVALIFIKACIJA (ostatak budžeta) ---
+  const spentMs = Date.now() - startedAt;
+  const { leads, rejected, usedFallbackCount, skippedForTime } = await qualifyBatch(scrapeResult.leads, {
     rulesOnly: params.rulesOnly,
     minScore: params.minScore,
+    deadline: createDeadline(totalBudgetMs ? Math.max(10_000, totalBudgetMs - spentMs) : undefined, 10_000),
     onProgress: (done, total) => {
       if (done % 10 === 0 || done === total) log.info(`kvalifikacija ${done}/${total}`);
     },
@@ -142,6 +161,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineRepor
     topLeads: leads.slice(0, 10),
     rejectedSample: rejected.slice(0, 10),
     errors: scrapeResult.errors,
+    stoppedEarly: scrapeResult.stoppedEarly || skippedForTime > 0,
     ...(jsonPath ? { jsonPath } : {}),
   };
 

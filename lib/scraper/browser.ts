@@ -81,37 +81,171 @@ function pick<T>(arr: readonly T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]!;
 }
 
+/** Flagovi koji važe u SVAKOM okruženju. */
+const COMMON_ARGS = [
+  // Ključni flag: bez njega Chromium sam objavljuje da je automatizovan.
+  '--disable-blink-features=AutomationControlled',
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  // Bez ovoga puca u Docker-u (Railway/Render) zbog malog /dev/shm.
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--no-first-run',
+  '--no-default-browser-check',
+  '--disable-features=IsolateOrigins,site-per-process,TranslateUI',
+  '--lang=sr-RS',
+];
+
+/** Da li radimo u serverless okruženju (Vercel funkcija). */
+export function isServerless(): boolean {
+  if (process.env.SERVERLESS_CHROMIUM === 'true') return true;
+  if (process.env.SERVERLESS_CHROMIUM === 'false') return false;
+  return process.env.VERCEL === '1' || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+}
+
+/**
+ * Pokretanje browsera — dva potpuno različita puta:
+ *
+ *  1. WORKER / LOKALNO: pun `playwright` paket sa svojim Chromium-om.
+ *  2. VERCEL FUNKCIJA:  `playwright-core` + `@sparticuz/chromium` — Chromium
+ *     spakovan za Lambdu, raspakuje se u /tmp pri prvom pozivu (~2-4s hladan start).
+ *     Bez ovoga na Vercel-u ne postoji browser uopšte.
+ *
+ * Serverless put zahteva Vercel Pro (funkcija do 300s i do 3008 MB memorije);
+ * na Hobby planu 60s ne stigne ni da raspakuje Chromium i uradi pretragu.
+ */
+async function launchBrowser(opts: { headless: boolean; proxy?: BrowserSessionOptions['proxy'] }): Promise<Browser> {
+  if (isServerless()) {
+    log.info('pokrećem serverless Chromium (@sparticuz/chromium)');
+    const [{ chromium: playwrightCore }, chromiumModule] = await Promise.all([
+      import('playwright-core'),
+      import('@sparticuz/chromium'),
+    ]);
+    // Paket se objavljuje i kao CJS i kao ESM — `default` postoji samo u jednom slučaju.
+    const raw = chromiumModule as unknown as { default?: ServerlessChromium } & ServerlessChromium;
+    const pack: ServerlessChromium = raw.default ?? raw;
+
+    const executablePath = await pack.executablePath();
+    return playwrightCore.launch({
+      headless: true,
+      executablePath,
+      args: Array.from(new Set([...(pack.args ?? []), ...COMMON_ARGS])),
+      ...(opts.proxy ? { proxy: opts.proxy } : {}),
+    });
+  }
+
+  const { chromium } = await import('playwright');
+  return chromium.launch({
+    headless: opts.headless,
+    args: [...COMMON_ARGS, '--window-size=1440,900'],
+    ...(opts.proxy ? { proxy: opts.proxy } : {}),
+  });
+}
+
+interface ServerlessChromium {
+  args: string[];
+  executablePath: (input?: string) => Promise<string>;
+}
+
+/**
+ * STEALTH SKRIPTA — namerno kao STRING, a ne kao funkcija.
+ *
+ * Ovo je plaćeno debagovanjem i vredi zapamtiti: `addInitScript(fn)` šalje
+ * `fn.toString()` u browser. Kada kod prolazi kroz esbuild/tsx (a worker se
+ * pokreće baš tako: `npx tsx scripts/worker.ts`), transpajler ubaci svoj
+ * helper `__name(...)` u telo funkcije. Taj helper u browseru NE POSTOJI, pa
+ * skripta pukne sa `ReferenceError: __name is not defined` — i to tiho, jer
+ * greška ide u konzolu stranice koju niko ne gleda.
+ *
+ * Posledica je bila da maska nije radila UOPŠTE: `navigator.webdriver`,
+ * plugin-ovi, jezici, WebGL — sve ostane na podrazumevanim, prepoznatljivo
+ * headless vrednostima. Kao string nema transpilacije, pa nema ni helpera.
+ *
+ * Drugo pravilo: svaka izmena ide u svoj try/catch. Neka svojstva u pojedinim
+ * Chromium build-ovima nisu konfigurabilna i `defineProperty` baci TypeError —
+ * bez izolacije, jedan izuzetak obori sve izmene posle sebe.
+ */
+const STEALTH_SCRIPT = `
+(function () {
+  function define(target, prop, getter) {
+    try {
+      Object.defineProperty(target, prop, { get: getter, configurable: true });
+    } catch (e1) {
+      try {
+        Object.defineProperty(Object.getPrototypeOf(target), prop, { get: getter, configurable: true });
+      } catch (e2) { /* svojstvo je zaključano — idemo dalje */ }
+    }
+  }
+  function attempt(fn) { try { fn(); } catch (e) { /* jedna izmena ne obara ostale */ } }
+
+  // 1) navigator.webdriver === true je prva provera svakog anti-bot sistema
+  define(navigator, 'webdriver', function () { return undefined; });
+
+  // 2) Headless prijavljuje 0 plugin-ova; pravi Chrome ih ima
+  define(navigator, 'plugins', function () {
+    return [
+      { name: 'PDF Viewer', filename: 'internal-pdf-viewer' },
+      { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer' },
+      { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer' }
+    ];
+  });
+  define(navigator, 'mimeTypes', function () {
+    return [{ type: 'application/pdf' }, { type: 'text/pdf' }];
+  });
+
+  define(navigator, 'languages', function () { return ['sr-RS', 'sr', 'en-US', 'en']; });
+  define(navigator, 'hardwareConcurrency', function () { return 8; });
+  define(navigator, 'deviceMemory', function () { return 8; });
+
+  // 3) window.chrome postoji u pravom Chrome-u, u headless-u ne
+  attempt(function () {
+    if (!window.chrome) {
+      window.chrome = { runtime: {}, app: { isInstalled: false }, csi: function () {}, loadTimes: function () {} };
+    }
+  });
+
+  // 4) Notification permission u headless-u vraća "denied" umesto "default"
+  attempt(function () {
+    var permissions = window.navigator.permissions;
+    if (!permissions || !permissions.query) return;
+    var originalQuery = permissions.query.bind(permissions);
+    permissions.query = function (params) {
+      return params && params.name === 'notifications'
+        ? Promise.resolve({ state: Notification.permission })
+        : originalQuery(params);
+    };
+  });
+
+  // 5) WebGL vendor/renderer — headless odaje "SwiftShader"/"Google Inc."
+  attempt(function () {
+    if (typeof WebGLRenderingContext === 'undefined') return;
+    var patch = function (proto) {
+      var original = proto.getParameter;
+      proto.getParameter = function (parameter) {
+        if (parameter === 37445) return 'Intel Inc.';
+        if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+        return original.call(this, parameter);
+      };
+    };
+    patch(WebGLRenderingContext.prototype);
+    if (typeof WebGL2RenderingContext !== 'undefined') patch(WebGL2RenderingContext.prototype);
+  });
+})();
+`;
+
 /**
  * Pravi "očovečen" browser kontekst.
  * Sve ovo je besplatno — jedini trošak je par sekundi po pokretanju.
  */
 export async function createSession(opts: BrowserSessionOptions = {}): Promise<BrowserSession> {
-  // Dinamički import: Playwright se NIKAD ne učitava u Next/serverless bundle.
-  const { chromium } = await import('playwright');
-
   const headless = opts.headless ?? process.env.SCRAPER_HEADLESS !== 'false';
-  const storageDir = opts.storageDir ?? process.env.SCRAPER_STORAGE_DIR ?? path.join(process.cwd(), '.scraper-state');
+  // Na Vercel-u je ceo fajl-sistem read-only osim /tmp.
+  const defaultStorageDir = isServerless() ? '/tmp/scraper-state' : path.join(process.cwd(), '.scraper-state');
+  const storageDir = opts.storageDir ?? process.env.SCRAPER_STORAGE_DIR ?? defaultStorageDir;
   const profile = opts.profile ?? 'default';
   const statePath = path.join(storageDir, `${profile}.json`);
 
-  const browser = await chromium.launch({
-    headless,
-    args: [
-      // Ključni flag: bez njega Chromium sam objavljuje da je automatizovan.
-      '--disable-blink-features=AutomationControlled',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      // Bez ovoga puca u Docker-u (Railway/Render) zbog malog /dev/shm.
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--disable-features=IsolateOrigins,site-per-process,TranslateUI',
-      '--lang=sr-RS',
-      '--window-size=1440,900',
-    ],
-    proxy: opts.proxy,
-  });
+  const browser = await launchBrowser({ headless, proxy: opts.proxy });
 
   const storageState = await loadState(statePath);
   const userAgent = pick(USER_AGENTS);
@@ -140,42 +274,7 @@ export async function createSession(opts: BrowserSessionOptions = {}): Promise<B
   context.setDefaultTimeout(20_000);
 
   // --- Maskiranje automatizacije (izvršava se pre svakog skripta stranice) ---
-  await context.addInitScript(() => {
-    // 1) navigator.webdriver === true je prva stvar koju svaki anti-bot proverava
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-
-    // 2) Headless Chromium prijavljuje 0 plugin-ova — pravi Chrome ih ima
-    Object.defineProperty(navigator, 'plugins', {
-      get: () => [
-        { name: 'PDF Viewer', filename: 'internal-pdf-viewer' },
-        { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer' },
-        { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer' },
-      ],
-    });
-
-    Object.defineProperty(navigator, 'languages', { get: () => ['sr-RS', 'sr', 'en-US', 'en'] });
-    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-
-    // 3) window.chrome postoji u pravom Chrome-u, ne postoji u headless-u
-    const w = window as unknown as Record<string, unknown>;
-    if (!w.chrome) w.chrome = { runtime: {}, app: { isInstalled: false } };
-
-    // 4) Notification permission u headless-u vraća "denied" umesto "default"
-    const originalQuery = window.navigator.permissions.query.bind(window.navigator.permissions);
-    window.navigator.permissions.query = (params: PermissionDescriptor) =>
-      params.name === 'notifications'
-        ? Promise.resolve({ state: Notification.permission } as PermissionStatus)
-        : originalQuery(params);
-
-    // 5) WebGL vendor/renderer — headless odaje "SwiftShader"
-    const getParameter = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function (parameter: number) {
-      if (parameter === 37445) return 'Intel Inc.';
-      if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-      return getParameter.call(this, parameter);
-    };
-  });
+  await context.addInitScript({ content: STEALTH_SCRIPT });
 
   // --- Blokiranje slika/fontova/trackera: brže, tiše, manje saobraćaja ---
   if (opts.blockAssets ?? true) {

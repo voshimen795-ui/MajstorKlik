@@ -19,6 +19,7 @@ import { TARGET_PROFILES, isCompetitor, type Craft, type TargetKind } from '../c
 import { buildSmsLink, buildViberLink, buildWaLink, pickBestPhone, type ParsedPhone } from '../utils/phoneUtils';
 import { fingerprint, normalizeSr, squash } from '../utils/text';
 import { createLogger } from '../utils/logger';
+import { createDeadline, type Deadline } from '../utils/deadline';
 import { z } from 'zod';
 
 const log = createLogger('ai:engine');
@@ -303,6 +304,8 @@ export interface BatchResult {
   leads: LeadRecord[];
   rejected: { name: string; reason: string }[];
   usedFallbackCount: number;
+  /** Koliko unosa nije stiglo na obradu zbog vremenskog budžeta. */
+  skippedForTime: number;
 }
 
 /**
@@ -312,20 +315,39 @@ export interface BatchResult {
  */
 export async function qualifyBatch(
   raws: RawLead[],
-  opts: QualifyOptions & { concurrency?: number; onProgress?: (done: number, total: number) => void } = {},
+  opts: QualifyOptions & {
+    concurrency?: number;
+    onProgress?: (done: number, total: number) => void;
+    /** Kad je zadat, obrada staje pre isteka i vraća ono što je stiglo. */
+    deadline?: Deadline;
+  } = {},
 ): Promise<BatchResult> {
   const concurrency = Math.max(1, opts.concurrency ?? Number(process.env.AI_CONCURRENCY ?? 3));
+  const deadline = opts.deadline ?? createDeadline();
   const leads: LeadRecord[] = [];
   const rejected: { name: string; reason: string }[] = [];
   let usedFallbackCount = 0;
+  let skippedForTime = 0;
   let done = 0;
   let cursor = 0;
+
+  // Kad je vreme ograničeno, prvo obrađujemo unose koji IMAJU telefon —
+  // lead bez broja ionako biva odbačen, šteta je trošiti sekunde na njega.
+  const queue = deadline.remainingMs() === Number.POSITIVE_INFINITY
+    ? raws
+    : [...raws].sort((a, b) => Number(!!b.rawPhone) - Number(!!a.rawPhone));
 
   async function worker(): Promise<void> {
     for (;;) {
       const index = cursor++;
-      if (index >= raws.length) return;
-      const raw = raws[index]!;
+      if (index >= queue.length) return;
+      // Jedna kvalifikacija sa AI-jem traje 2-6s; ispod toga ne počinjemo novu.
+      if (!deadline.hasRoomFor(7_000)) {
+        skippedForTime += queue.length - index;
+        cursor = queue.length;
+        return;
+      }
+      const raw = queue[index]!;
       try {
         const result = await qualifyLead(raw, opts);
         if (result.lead) leads.push(result.lead);
@@ -335,15 +357,19 @@ export async function qualifyBatch(
         rejected.push({ name: raw.name, reason: `greška: ${String(error).slice(0, 160)}` });
       } finally {
         done++;
-        opts.onProgress?.(done, raws.length);
+        opts.onProgress?.(done, queue.length);
       }
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, raws.length) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, () => worker()));
+
+  if (skippedForTime > 0) {
+    log.warn(`${skippedForTime} unosa nije stiglo na obradu zbog vremenskog budžeta`);
+  }
 
   leads.sort((a, b) => b.lead_score - a.lead_score);
-  return { leads, rejected, usedFallbackCount };
+  return { leads, rejected, usedFallbackCount, skippedForTime };
 }
 
 /* ------------------------------------------------------------------ */

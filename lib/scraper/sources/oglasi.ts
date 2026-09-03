@@ -27,6 +27,7 @@ import { humanDelay } from '../../utils/rateLimiter';
 import { extractLeadsFromText } from '../../ai/aiEngine';
 import { extractPhones } from '../../utils/phoneUtils';
 import { normalizeSr } from '../../utils/text';
+import { createDeadline, type Deadline } from '../../utils/deadline';
 
 const log = createLogger('scraper:oglasi');
 
@@ -102,6 +103,7 @@ export interface OglasiScrapeOptions {
   /** Koliko strana rezultata po izvoru. */
   maxPages?: number;
   maxPerPage?: number;
+  deadline?: Deadline;
 }
 
 export async function scrapeOglasi(page: Page, opts: OglasiScrapeOptions): Promise<RawLead[]> {
@@ -115,11 +117,16 @@ export async function scrapeOglasi(page: Page, opts: OglasiScrapeOptions): Promi
   const maxPages = opts.maxPages ?? 2;
   const maxPerPage = opts.maxPerPage ?? 20;
   const onlyAgencies = process.env.OGLASI_ONLY_AGENCIES !== 'false';
+  const deadline = opts.deadline ?? createDeadline();
 
   const results: RawLead[] = [];
 
   for (const source of loadSources()) {
     for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+      if (!deadline.hasRoomFor(30_000)) {
+        log.warn('vremenski budžet potrošen — prekidam oglase', { skupljeno: results.length });
+        return results;
+      }
       const url = source.buildUrl({ zoneQuery: zone.label, minPriceEur, page: pageNum });
       if (!url) {
         log.warn('izvor nema podešen URL — preskačem', { source: source.id });

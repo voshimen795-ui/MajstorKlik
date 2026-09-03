@@ -22,6 +22,7 @@ import type { RawLead } from '../../types/lead';
 import { createLogger } from '../../utils/logger';
 import { humanDelay, randomBetween, sleep } from '../../utils/rateLimiter';
 import { extractLeadsFromText } from '../../ai/aiEngine';
+import { createDeadline, type Deadline } from '../../utils/deadline';
 
 const log = createLogger('scraper:maps');
 
@@ -36,6 +37,8 @@ export interface MapsScrapeOptions {
   maxDetails?: number;
   /** Koliko ankera (kvartova) iz zone obilazimo. */
   maxAnchors?: number;
+  /** Vremenski budžet — na serverlessu obavezan, inače nas platforma ubije nasred posla. */
+  deadline?: Deadline;
 }
 
 interface CardSnapshot {
@@ -57,9 +60,17 @@ export async function scrapeGoogleMaps(page: Page, opts: MapsScrapeOptions): Pro
 
   const results: RawLead[] = [];
   const seenHrefs = new Set<string>();
+  const deadline = opts.deadline ?? createDeadline();
 
   for (const query of queries) {
     for (const anchor of anchors) {
+      // Jedan upit (učitavanje + scroll + par otvaranja) traje ~45s. Ako toliko
+      // nemamo, staje se ovde uredno umesto da nas platforma ubije nasred posla.
+      if (!deadline.hasRoomFor(45_000)) {
+        log.warn('vremenski budžet pri kraju — prekidam pretragu', { skupljeno: results.length, preostalo: deadline.describe() });
+        return results;
+      }
+
       const url = mapsSearchUrl(query, anchor);
       log.info('pretraga', { query, anchor: anchor.label });
 
@@ -69,6 +80,12 @@ export async function scrapeGoogleMaps(page: Page, opts: MapsScrapeOptions): Pro
         await humanDelay(1200, 2600);
 
         if (await looksBlocked(page)) {
+          // Na workeru se isplati sačekati; u serverless funkciji nemamo 5 minuta
+          // za čekanje, pa je jedino ispravno vratiti ono što imamo.
+          if (!deadline.hasRoomFor(400_000)) {
+            log.warn('Google nas je blokirao — nema vremena za hlađenje, vraćam skupljeno', { skupljeno: results.length });
+            return results;
+          }
           log.warn('Google nas je blokirao — pauza 3-6 min i prelazak na sledeći upit');
           await sleep(randomBetween(180_000, 360_000));
           continue;
@@ -103,7 +120,8 @@ export async function scrapeGoogleMaps(page: Page, opts: MapsScrapeOptions): Pro
           seenHrefs.add(card.href);
 
           // Bez telefona lead ne vredi ništa — zato otvaramo detalje za prvih N.
-          if (opened < maxDetails) {
+          // Jedno otvaranje kartice traje ~8s sa pauzom.
+          if (opened < maxDetails && deadline.hasRoomFor(12_000)) {
             opened++;
             const detail = await openDetail(page, card, opts);
             if (detail) {

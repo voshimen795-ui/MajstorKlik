@@ -4,13 +4,18 @@
 # biblioteke koje mu trebaju. Ručno instaliranje tih ~40 .deb paketa je
 # najčešći razlog zašto skreper radi lokalno a puca na serveru.
 
-FROM mcr.microsoft.com/playwright:v1.48.0-jammy
+# Tag MORA da odgovara verziji `playwright` u package.json (1.48.2),
+# inače Chromium iz slike i Playwright klijent nisu iste generacije.
+FROM mcr.microsoft.com/playwright:v1.48.2-jammy
 
+# SERVERLESS_CHROMIUM=false: worker koristi pun Playwright Chromium iz slike,
+# ne Lambda build iz @sparticuz/chromium.
 ENV NODE_ENV=production \
     TZ=Europe/Belgrade \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     SCRAPER_HEADLESS=true \
-    RUN_SCRAPER_HERE=true
+    RUN_SCRAPER_HERE=true \
+    SERVERLESS_CHROMIUM=false
 
 WORKDIR /app
 

@@ -13,12 +13,13 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { requireCronSecret } from '@/lib/api/auth';
 import { buildDailyPlan } from '@/lib/pipeline/runPipeline';
 import { aiHealth } from '@/lib/ai/router';
+import { defaultBudgetMs } from '@/lib/utils/deadline';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-// 60s je maksimum koji prolazi na SVAKOM Vercel planu (Hobby uključen).
-// Ova ruta ionako samo prosleđuje posao workeru — ne skrejpuje sama.
-export const maxDuration = 60;
+// Vercel Pro: 300s. Sa SERVERLESS_CHROMIUM=true tura se vrti ovde;
+// bez toga se posao prosleđuje workeru i ruta se završi za sekundu.
+export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
   const denied = requireCronSecret(request);
@@ -39,10 +40,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: true, skipped: true, razlog: 'svi AI provajderi u cooldown-u', job });
   }
 
-  if (process.env.RUN_SCRAPER_HERE === 'true') {
+  const serverless = process.env.SERVERLESS_CHROMIUM === 'true';
+  if (serverless || process.env.RUN_SCRAPER_HERE === 'true') {
     const { runPipeline } = await import('@/lib/pipeline/runPipeline');
-    const report = await runPipeline({ category: job.category, rich_zone: job.rich_zone, headless: true });
-    return NextResponse.json({ ok: true, mode: 'local', job, report });
+    const report = await runPipeline({
+      category: job.category,
+      rich_zone: job.rich_zone,
+      headless: true,
+      // U funkciji radimo kraće ture, ali češće (5 crona dnevno) — zbir je isti.
+      ...(serverless ? { maxPerQuery: 12, maxDetails: 8, timeBudgetMs: defaultBudgetMs() } : {}),
+    });
+    return NextResponse.json({ ok: true, mode: serverless ? 'serverless' : 'local', job, report });
   }
 
   const workerUrl = process.env.WORKER_URL;
@@ -51,8 +59,12 @@ export async function GET(request: NextRequest) {
       {
         ok: false,
         job,
-        error:
-          'Cron je aktivan ali nema gde da izvrši posao. Podesi WORKER_URL (Railway/Render worker) ili pokreni worker procesom: npm run harvest:loop',
+        error: 'Cron je aktivan ali nema gde da izvrši posao.',
+        resenja: [
+          'Vercel Pro: SERVERLESS_CHROMIUM=true',
+          'Railway/Render: WORKER_URL + RUN_SCRAPER_HERE=true na workeru',
+          'Lokalno: npm run harvest:loop',
+        ],
       },
       { status: 501 },
     );

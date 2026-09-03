@@ -26,6 +26,7 @@ import { humanDelay } from '../../utils/rateLimiter';
 import { extractLeadsFromText } from '../../ai/aiEngine';
 import { extractPhones } from '../../utils/phoneUtils';
 import { scrapeGoogleMaps } from './googleMaps';
+import { createDeadline, type Deadline } from '../../utils/deadline';
 
 const log = createLogger('scraper:registar');
 
@@ -44,11 +45,13 @@ export interface RegistarScrapeOptions {
   /** Dodatni URL-ovi registara/direktorijuma. Ako je prazno, čita se REGISTAR_SZ_URLS. */
   seedUrls?: string[];
   maxPerQuery?: number;
+  deadline?: Deadline;
 }
 
 export async function scrapeRegistarSZ(page: Page, opts: RegistarScrapeOptions): Promise<RawLead[]> {
   const zone = RICH_ZONES[opts.zoneId];
   const results: RawLead[] = [];
+  const deadline = opts.deadline ?? createDeadline();
 
   // --- A) Maps put: uvek radi, bez podešavanja ---
   const viaMaps = await scrapeGoogleMaps(page, {
@@ -58,6 +61,7 @@ export async function scrapeRegistarSZ(page: Page, opts: RegistarScrapeOptions):
     maxPerQuery: opts.maxPerQuery ?? 15,
     maxDetails: 12,
     maxAnchors: 1,
+    deadline,
   });
   results.push(...viaMaps.map((lead) => ({ ...lead, source: 'registar_sz' as const })));
 
@@ -65,6 +69,10 @@ export async function scrapeRegistarSZ(page: Page, opts: RegistarScrapeOptions):
   const seeds = opts.seedUrls ?? (process.env.REGISTAR_SZ_URLS ?? '').split(',').map((u) => u.trim()).filter(Boolean);
 
   for (const url of seeds) {
+    if (!deadline.hasRoomFor(25_000)) {
+      log.warn('vremenski budžet potrošen — preskačem preostale registre', { skupljeno: results.length });
+      break;
+    }
     if (!(await isAllowedByRobots(url))) {
       log.warn('robots.txt zabranjuje ovaj URL — preskačem', { url });
       continue;

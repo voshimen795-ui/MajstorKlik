@@ -20,6 +20,7 @@ import type { Craft } from '../config/categories';
 import type { RawLead } from '../types/lead';
 import { createLogger } from '../utils/logger';
 import { humanDelay, sleep, randomBetween } from '../utils/rateLimiter';
+import { createDeadline, defaultBudgetMs } from '../utils/deadline';
 
 const log = createLogger('scraper');
 
@@ -56,6 +57,12 @@ export interface ScrapeParams {
   /** Postojeća sesija (kad skrejpuješ više zona u jednom prolazu). */
   session?: BrowserSession;
   headless?: boolean;
+  /**
+   * Vremenski budžet u ms. Na Vercel-u je obavezan (Pro seče funkciju na 300s):
+   * skreper sam staje pre isteka i uredno vrati ono što je skupio.
+   * Prazno = bez ograničenja (worker, lokalno).
+   */
+  timeBudgetMs?: number;
 }
 
 export interface ScrapeResult {
@@ -65,6 +72,8 @@ export interface ScrapeResult {
   bySource: Record<string, number>;
   durationMs: number;
   errors: string[];
+  /** true kad je posao prekinut zbog vremenskog budžeta (nije greška). */
+  stoppedEarly: boolean;
 }
 
 /** Prevodi bilo koji zapis zone u kanonski id ili puca sa jasnom porukom. */
@@ -93,13 +102,24 @@ export async function scrape(params: ScrapeParams): Promise<ScrapeResult> {
 
   log.info('start skreovanja', { craft: params.category, zona: zone.label, izvori: sources.join(', ') });
 
+  const deadline = createDeadline(params.timeBudgetMs ?? defaultBudgetMs());
   const ownSession = !params.session;
   const session = params.session ?? (await createSession({ profile: 'maps', headless: params.headless }));
   const page: Page = session.page;
   const leads: RawLead[] = [];
+  let stoppedEarly = false;
 
   try {
     for (const source of sources) {
+      // Najmanji smislen posao po izvoru je ~60s; ispod toga ne počinjemo.
+      if (!deadline.hasRoomFor(60_000)) {
+        stoppedEarly = true;
+        log.warn('vremenski budžet potrošen — preskačem preostale izvore', {
+          preskočeno: sources.slice(sources.indexOf(source)).join(','),
+        });
+        break;
+      }
+
       try {
         let found: RawLead[] = [];
 
@@ -110,18 +130,25 @@ export async function scrape(params: ScrapeParams): Promise<ScrapeResult> {
             queries: params.queries,
             maxPerQuery: params.maxPerQuery,
             maxDetails: params.maxDetails,
+            deadline,
           });
         } else if (source === 'registar_sz') {
-          found = await scrapeRegistarSZ(page, { craft: params.category, zoneId, maxPerQuery: params.maxPerQuery });
+          found = await scrapeRegistarSZ(page, {
+            craft: params.category,
+            zoneId,
+            maxPerQuery: params.maxPerQuery,
+            deadline,
+          });
         } else if (source === 'oglasi') {
-          found = await scrapeOglasi(page, { craft: params.category, zoneId });
+          found = await scrapeOglasi(page, { craft: params.category, zoneId, deadline });
         }
 
         bySource[source] = found.length;
         leads.push(...found);
 
         // Duža pauza između izvora — najjeftinija zaštita od blokade koju imaš.
-        await sleep(randomBetween(8_000, 20_000));
+        // U serverlessu je skraćujemo: tamo je vreme skuplje od diskrecije.
+        await sleep(deadline.hasRoomFor(120_000) ? randomBetween(8_000, 20_000) : randomBetween(1_500, 3_500));
       } catch (error) {
         const message = `${source}: ${String(error).slice(0, 200)}`;
         errors.push(message);
@@ -129,6 +156,7 @@ export async function scrape(params: ScrapeParams): Promise<ScrapeResult> {
       }
     }
 
+    if (deadline.expired()) stoppedEarly = true;
     await session.saveState();
   } finally {
     if (ownSession) {
@@ -147,7 +175,7 @@ export async function scrape(params: ScrapeParams): Promise<ScrapeResult> {
     zona: zone.label,
   });
 
-  return { leads: deduped, zone: zoneId, craft: params.category, bySource, durationMs, errors };
+  return { leads: deduped, zone: zoneId, craft: params.category, bySource, durationMs, errors, stoppedEarly };
 }
 
 /**

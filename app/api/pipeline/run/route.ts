@@ -1,26 +1,27 @@
 /**
  * POST /api/pipeline/run — ručno pokretanje ture prikupljanja.
  *
- * VAŽNO O OKRUŽENJU:
- *   Vercel serverless funkcije NEMAJU Chromium i imaju limit trajanja (10-60s),
- *   a jedna tura skreovanja traje 5-20 minuta. Zato:
+ * TRI NAČINA IZVRŠAVANJA, po prioritetu:
  *
- *     - na Vercel-u  -> ova ruta PROSLEĐUJE posao workeru (WORKER_URL)
- *     - na Railway/Render/VPS-u (RUN_SCRAPER_HERE=true) -> izvršava turu lokalno
+ *   1. SERVERLESS_CHROMIUM=true (Vercel Pro)  -> tura se vrti u samoj funkciji,
+ *      sa Chromium-om iz @sparticuz/chromium i budžetom od ~280s.
+ *   2. RUN_SCRAPER_HERE=true (Railway/Render/VPS) -> tura lokalno, bez limita.
+ *   3. WORKER_URL                              -> posao se prosleđuje workeru.
  *
- *   Ako nije podešeno ni jedno ni drugo, ruta to jasno kaže umesto da tiho puca.
+ * Ako ništa nije podešeno, ruta to jasno kaže umesto da tiho puca.
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { requireToken } from '@/lib/api/auth';
 import { toZoneId } from '@/lib/scraper/scraper';
+import { defaultBudgetMs } from '@/lib/utils/deadline';
 import type { Craft } from '@/lib/config/categories';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-// 60s prolazi na svakom planu. Na Vercel-u ova ruta samo prosleđuje posao;
-// kad radi lokalno (RUN_SCRAPER_HERE=true na Railway/Render/VPS) limit ne važi.
-export const maxDuration = 60;
+// Vercel Pro: 300s. Pipeline sam staje na ~280s (vidi lib/utils/deadline.ts)
+// pa uvek stigne da upiše ono što je skupio.
+export const maxDuration = 300;
 
 const CRAFTS: Craft[] = ['vodoinstalater', 'gipsar', 'moler'];
 
@@ -28,7 +29,15 @@ export async function POST(request: NextRequest) {
   const denied = requireToken(request);
   if (denied) return denied;
 
-  let body: { category?: string; rich_zone?: string; sources?: string[]; dryRun?: boolean; minScore?: number; maxPerQuery?: number };
+  let body: {
+    category?: string;
+    rich_zone?: string;
+    sources?: string[];
+    dryRun?: boolean;
+    minScore?: number;
+    maxPerQuery?: number;
+    timeBudgetMs?: number;
+  };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -47,8 +56,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: String((error as Error).message) }, { status: 400 });
   }
 
-  // --- Slučaj A: ovaj proces sme da skrejpuje (Railway / Render / VPS) ---
-  if (process.env.RUN_SCRAPER_HERE === 'true') {
+  // --- Slučaj A: ovaj proces sme da skrejpuje (Vercel Pro ili Railway/Render/VPS) ---
+  const canRunHere = process.env.SERVERLESS_CHROMIUM === 'true' || process.env.RUN_SCRAPER_HERE === 'true';
+  if (canRunHere) {
     const { runPipeline } = await import('@/lib/pipeline/runPipeline');
     try {
       const report = await runPipeline({
@@ -57,10 +67,17 @@ export async function POST(request: NextRequest) {
         sources: body.sources as ('google_maps' | 'registar_sz' | 'oglasi')[] | undefined,
         dryRun: body.dryRun,
         minScore: body.minScore,
-        maxPerQuery: body.maxPerQuery,
+        // U serverlessu smanjujemo zahvat — bolje 12 obrađenih nego 40 prekinutih.
+        maxPerQuery: body.maxPerQuery ?? (process.env.SERVERLESS_CHROMIUM === 'true' ? 12 : undefined),
+        maxDetails: process.env.SERVERLESS_CHROMIUM === 'true' ? 8 : undefined,
+        timeBudgetMs: body.timeBudgetMs ?? defaultBudgetMs(),
         headless: true,
       });
-      return NextResponse.json({ ok: true, mode: 'local', report });
+      return NextResponse.json({
+        ok: true,
+        mode: process.env.SERVERLESS_CHROMIUM === 'true' ? 'serverless' : 'local',
+        report,
+      });
     } catch (error) {
       return NextResponse.json({ ok: false, mode: 'local', error: String(error).slice(0, 500) }, { status: 500 });
     }
@@ -88,8 +105,12 @@ export async function POST(request: NextRequest) {
   return NextResponse.json(
     {
       ok: false,
-      error:
-        'Skreper ne može da radi u ovom okruženju. Postavi RUN_SCRAPER_HERE=true (Railway/Render/VPS sa Chromium-om) ili WORKER_URL da se posao prosledi workeru.',
+      error: 'Skreper nema gde da se izvrši u ovom okruženju.',
+      resenja: [
+        'Vercel Pro: postavi SERVERLESS_CHROMIUM=true (tura se vrti u funkciji, do 300s)',
+        'Railway/Render/VPS: postavi RUN_SCRAPER_HERE=true',
+        'Ili postavi WORKER_URL da se posao prosledi workeru',
+      ],
       hint: 'Lokalno: npm run harvest -- --craft gipsar --zone Vracar',
     },
     { status: 501 },
