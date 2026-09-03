@@ -19,9 +19,9 @@ import type { Craft } from '@/lib/config/categories';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-// Vercel Pro: 300s. Pipeline sam staje na ~280s (vidi lib/utils/deadline.ts)
-// pa uvek stigne da upiše ono što je skupio.
-export const maxDuration = 300;
+// Trajanje se podešava u `vercel.json` (npm run vercel:hobby / vercel:pro),
+// ne ovde — jedan izvor istine. Pipeline sam staje pre isteka budžeta,
+// vidi `lib/utils/deadline.ts`.
 
 const CRAFTS: Craft[] = ['vodoinstalater', 'gipsar', 'moler'];
 

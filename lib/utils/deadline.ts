@@ -50,11 +50,20 @@ export function createDeadline(budgetMs?: number, safetyMs = 15_000): Deadline {
   return deadline;
 }
 
-/** Podrazumevani budžet po okruženju — Vercel Pro seče na 300s. */
+/**
+ * Podrazumevani budžet po okruženju.
+ *
+ * Namerno je konzervativan: 50s je bezbedno na SVAKOM Vercel planu (Hobby seče
+ * funkciju na 60s). Kod ne može u runtime-u da sazna koji je plan aktivan, a
+ * pogrešna pretpostavka znači ubijenu funkciju i izgubljene leadove.
+ *
+ * Na Pro planu podigni eksplicitno:
+ *   vercel env add RUN_TIME_BUDGET_MS   ->   280000
+ */
 export function defaultBudgetMs(): number | undefined {
   const explicit = Number(process.env.RUN_TIME_BUDGET_MS ?? 0);
   if (explicit > 0) return explicit;
   // Na Vercel-u uvek radimo sa budžetom; worker/lokalno nema ograničenje.
-  if (process.env.VERCEL === '1') return 280_000;
+  if (process.env.VERCEL === '1') return 50_000;
   return undefined;
 }

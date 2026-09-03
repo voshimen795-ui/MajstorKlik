@@ -18,7 +18,8 @@ import { requireToken } from '@/lib/api/auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+// Trajanje: vidi `vercel.json` (provera browsera traje 3-8s, pa joj podrazumevanih
+// 10s zna da bude tesno — zato je i ova ruta navedena tamo).
 
 interface BrowserCheck {
   ok: boolean;

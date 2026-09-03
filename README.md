@@ -295,9 +295,49 @@ posao workeru na `WORKER_URL`, jer Vercel nema Chromium.
 > Obavezno postavi `API_TOKEN` i `CRON_SECRET` (`openssl rand -hex 32`).
 > Bez njih ti bilo ko može isprazniti AI kvotu ili pročitati bazu leadova.
 
+#### Ako deploy pada zbog crona — pročitaj ovo prvo
+
+```
+Error: Hobby accounts are limited to daily cron jobs.
+This cron expression would run more than once per day.
+```
+
+Vercel odbija **ceo deploy** ako `vercel.json` traži više nego što plan dozvoljava.
+Zato je podrazumevano stanje u repou Hobby-safe (1 cron dnevno, 60s) — deploy
+prolazi na svakom planu — a Pro se uključuje jednom komandom:
+
+```bash
+npm run vercel:hobby   # radi uvek (podrazumevano)
+npm run vercel:pro     # 5 cronova dnevno, 300s, 3009 MB
+```
+
+**Kupio si Pro a i dalje puca?** Skoro uvek je isti razlog: **Pro se plaća po
+scope-u** (lični nalog ili tim), a projekat sedi u drugom scope-u. Proveri:
+
+```bash
+vercel whoami      # koji nalog je aktivan
+vercel teams ls    # timovi i njihovi planovi
+vercel project ls  # u kom scope-u je projekat
+```
+
+U dashboardu: prebacivač scope-a gore levo pokazuje `Hobby` ili `Pro` pored imena.
+Otvori projekat → **Settings → General** i vidi kom scope-u pripada.
+
+Ako se ne poklapaju, imaš dva izbora:
+
+1. **Premesti projekat u Pro scope** — Settings → General → *Transfer project*.
+2. **Ostani na `npm run vercel:hobby`** i pusti raspored kroz worker ili
+   spoljni cron (opcije ispod). Ovo ne košta ništa i radi jednako dobro.
+
+> Cron u Vercelu nije motor mašine, nego okidač. Isti posao radi
+> `npm run harvest:loop` (worker) ili besplatan cron-job.org koji zove
+> `/api/cron/harvest?token=CRON_SECRET` koliko god puta dnevno hoćeš —
+> spoljni pozivi ne podležu Hobby ograničenju.
+
 #### Vercel Pro: cela mašina na jednom mestu
 
-Repo je podešen za **Pro plan**, što menja tri stvari:
+Kada je Pro aktivan na pravom scope-u i pustiš `npm run vercel:pro`, menjaju se
+tri stvari:
 
 | | Hobby | Pro (podešeno ovde) |
 |---|---|---|
@@ -308,11 +348,21 @@ Repo je podešen za **Pro plan**, što menja tri stvari:
 
 Sa Pro planom ti **više ne treba Railway ni Render** — Chromium radi u samoj
 Vercel funkciji preko `@sparticuz/chromium` (Chromium spakovan za Lambdu,
-raspakuje se u `/tmp` pri prvom pozivu). Uključuje se jednom promenljivom:
+raspakuje se u `/tmp` pri prvom pozivu). Uključuje se sa dve promenljive:
 
 ```bash
-vercel env add SERVERLESS_CHROMIUM   # vrednost: true
+npm run vercel:pro
+vercel env add SERVERLESS_CHROMIUM    # vrednost: true
+vercel env add RUN_TIME_BUDGET_MS     # vrednost: 280000
+vercel --prod
 ```
+
+> `RUN_TIME_BUDGET_MS` je bitan: kod podrazumevano računa sa 50s (Hobby-safe,
+> jer u runtime-u ne može da sazna koji je plan aktivan). Bez ove promenljive
+> Pro funkcija staje posle 50s i džabe ti 300.
+
+Na **Hobby** planu serverless skreper nema smisla: od 60s ode 3-5s na
+raspakivanje Chromium-a, pa ostane vremena za jedan upit. Tamo koristi worker.
 
 Posle deploya proveri da browser stvarno radi — **ne čekaj da cron tiho ne uradi ništa**:
 
@@ -453,8 +503,10 @@ uključi tek kad si proverio uslove konkretnog sajta i svesno prihvatio rizik.
 | `van premium zona` masovno | Maps ignoriše anker | proveri koordinate zone u `zones.ts` |
 | Sve odbačeno kao nizak skor | prag previsok | spusti `MIN_LEAD_SCORE` na 45 |
 | Chromium ne startuje na serveru | fale sistemske biblioteke | koristi `Dockerfile.worker` (Playwright slika) |
-| `Hobby accounts are limited to daily cron jobs` | cron češći od 1×/dan na Hobby planu | pređi na Pro, ili `vercel.json` → `0 9 * * *` |
-| `maxDuration exceeds the limit for your plan` | 300s traži Pro plan | na Hobby planu spusti na 60 u `vercel.json` i rutama |
+| `Hobby accounts are limited to daily cron jobs` | cron češći od 1×/dan, ili Pro nije na tom scope-u | `npm run vercel:hobby` (radi uvek); za Pro proveri scope — vidi sekciju Deployment |
+| `maxDuration exceeds the limit for your plan` | 300s traži Pro | `npm run vercel:hobby` |
+| Pro kupljen, deploy i dalje puca | projekat je u drugom scope-u nego plan | `vercel teams ls` + Settings → General → Transfer project |
+| Pro radi, ali tura staje posle ~50s | nije podešen `RUN_TIME_BUDGET_MS` | `vercel env add RUN_TIME_BUDGET_MS` → `280000` |
 | Skreper radi lokalno, na Vercel-u vraća 501 | `SERVERLESS_CHROMIUM` nije uključen | `vercel env add SERVERLESS_CHROMIUM` → `true` |
 | `browser.ok: false` u `/api/health?browser=1` | funkcija nema dovoljno memorije | `memory: 3009` u `vercel.json` (već podešeno), pa redeploy |
 | Tura vrati manje leadova nego lokalno | `stoppedEarly: true` — istekao budžet | normalno u serverlessu; smanji `maxPerQuery` ili pusti worker |

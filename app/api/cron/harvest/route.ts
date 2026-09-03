@@ -17,9 +17,10 @@ import { defaultBudgetMs } from '@/lib/utils/deadline';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-// Vercel Pro: 300s. Sa SERVERLESS_CHROMIUM=true tura se vrti ovde;
-// bez toga se posao prosleđuje workeru i ruta se završi za sekundu.
-export const maxDuration = 300;
+// NAMERNO nema `export const maxDuration` — trajanje se podešava isključivo u
+// `vercel.json` (prebacuje ga `npm run vercel:hobby` / `npm run vercel:pro`).
+// Kad bi stajalo i ovde, imali bismo dva izvora istine: vrednost veća od
+// plana obara CEO deploy, a to se dešava u fajlu koji niko ne gleda.
 
 export async function GET(request: NextRequest) {
   const denied = requireCronSecret(request);

@@ -12,7 +12,9 @@
     "harvest:loop": "tsx scripts/worker.ts",
     "phone:test": "tsx scripts/testPhones.ts",
     "playwright:install": "playwright install --with-deps chromium",
-    "stealth:test": "tsx scripts/testStealth.ts"
+    "stealth:test": "tsx scripts/testStealth.ts",
+    "vercel:hobby": "node scripts/setVercelPlan.mjs hobby",
+    "vercel:pro": "node scripts/setVercelPlan.mjs pro"
   },
   "dependencies": {
     "@sparticuz/chromium": "131.0.1",
