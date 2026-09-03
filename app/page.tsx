@@ -125,24 +125,98 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   );
 }
 
+/**
+ * Ekran za podešavanje — namerno DIJAGNOSTIČKI, ne generički.
+ *
+ * Prikazuje tačno koja promenljiva fali i gde se dodaje u OVOM okruženju
+ * (Vercel dashboard vs lokalni `.env.local`). Nikad ne prikazuje vrednosti,
+ * samo da li postoje — ovo je server komponenta i ključevi ne smeju u HTML.
+ */
 function SetupGuide() {
+  const onVercel = process.env.VERCEL === '1';
+
+  const required = [
+    { key: 'NEXT_PUBLIC_SUPABASE_URL', ok: !!process.env.NEXT_PUBLIC_SUPABASE_URL, opis: 'Supabase → Settings → API → Project URL' },
+    { key: 'SUPABASE_SERVICE_ROLE_KEY', ok: !!process.env.SUPABASE_SERVICE_ROLE_KEY, opis: 'isto mesto → service_role (tajni ključ)' },
+  ];
+
+  const aiKeys = [
+    { key: 'GROQ_API_KEY', ok: !!process.env.GROQ_API_KEY, opis: 'console.groq.com/keys' },
+    { key: 'GEMINI_API_KEY', ok: !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY), opis: 'aistudio.google.com/apikey' },
+    { key: 'OPENROUTER_API_KEY', ok: !!process.env.OPENROUTER_API_KEY, opis: 'openrouter.ai/keys' },
+  ];
+
+  const security = [
+    { key: 'API_TOKEN', ok: !!process.env.API_TOKEN, opis: 'bilo koji dug nasumičan string' },
+    { key: 'CRON_SECRET', ok: !!process.env.CRON_SECRET, opis: 'isto, ali drugi string' },
+  ];
+
+  const hasAnyAi = aiKeys.some((k) => k.ok);
+
   return (
-    <div className="empty">
+    <div className="empty setup">
       <h2>Mašina još nije povezana sa bazom</h2>
       <p className="muted">
-        Napravi besplatan Supabase projekat, pusti <code>supabase/schema.sql</code> u SQL editoru i popuni{' '}
-        <code>.env.local</code>:
+        {onVercel
+          ? 'Sajt radi, ali nema podataka jer promenljive nisu podešene na Vercelu. Evo šta tačno fali:'
+          : 'Popuni .env.local. Evo šta tačno fali:'}
       </p>
-      <pre>{`NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOi...
 
-# bar jedan AI ključ (svi imaju besplatan tier)
-GROQ_API_KEY=gsk_...
-GEMINI_API_KEY=AIza...
-OPENROUTER_API_KEY=sk-or-...`}</pre>
-      <p className="muted" style={{ marginTop: 14 }}>
-        Bez baze mašina i dalje radi — rezultat ide u <code>./export/*.json</code>.
+      <EnvGroup naslov="Baza (obavezno)" stavke={required} />
+      <EnvGroup naslov={`AI ključevi (dovoljan je jedan)${hasAnyAi ? '' : ' — nijedan nije podešen'}`} stavke={aiKeys} />
+      <EnvGroup naslov="Zaštita API ruta" stavke={security} />
+
+      {onVercel ? (
+        <ol className="setup-steps">
+          <li>
+            <b>supabase.com</b> → New project (besplatno, traje ~2 min)
+          </li>
+          <li>
+            SQL Editor → nalepi ceo <code>supabase/schema.sql</code> iz repoa → Run
+          </li>
+          <li>
+            Vercel → ovaj projekat → <b>Settings → Environment Variables</b> → dodaj promenljive označene sa ✗
+          </li>
+          <li>
+            <b>Deployments → Redeploy.</b> Ovo je obavezno: promenljive se primenjuju tek na novi deploy, postojeći ih ne
+            vidi.
+          </li>
+        </ol>
+      ) : (
+        <ol className="setup-steps">
+          <li>
+            <code>cp .env.example .env.local</code> i popuni vrednosti
+          </li>
+          <li>
+            Supabase → SQL Editor → pusti <code>supabase/schema.sql</code>
+          </li>
+          <li>
+            <code>npm run dev</code> ponovo (Next čita .env.local pri startu)
+          </li>
+        </ol>
+      )}
+
+      <p className="muted" style={{ marginTop: 16 }}>
+        Kad baza proradi, leadovi se pojave tek posle prve ture:{' '}
+        <code>npm run harvest -- --craft gipsar --zone Vracar</code>
       </p>
+    </div>
+  );
+}
+
+function EnvGroup({ naslov, stavke }: { naslov: string; stavke: { key: string; ok: boolean; opis: string }[] }) {
+  return (
+    <div className="env-group">
+      <div className="env-title">{naslov}</div>
+      <ul className="env-list">
+        {stavke.map((s) => (
+          <li key={s.key} className={s.ok ? 'env-ok' : 'env-missing'}>
+            <span className="env-mark">{s.ok ? '✓' : '✗'}</span>
+            <code>{s.key}</code>
+            <span className="env-hint">{s.opis}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

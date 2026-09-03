@@ -146,3 +146,37 @@ a { color: inherit; }
 
 .section-title { font-size: .76rem; text-transform: uppercase; letter-spacing: .09em; color: var(--slate-400); font-weight: 700; margin: 24px 0 10px; }
 .muted { color: var(--ink-muted); font-size: .85rem; }
+
+/* ---------- setup / dijagnostika okruženja ---------- */
+.setup { text-align: left; }
+.setup h2, .setup > .muted { text-align: center; }
+
+.env-group { margin-top: 20px; }
+.env-title {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--slate-400); font-weight: 700; margin-bottom: 8px;
+}
+.env-list { list-style: none; display: grid; gap: 6px; }
+.env-list li {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--slate-50); border: 1px solid var(--border);
+  border-radius: var(--r-sm); padding: 9px 12px; font-size: .84rem;
+}
+.env-list li.env-missing { background: var(--danger-bg); border-color: #f3c9c4; }
+.env-list li.env-ok { background: var(--success-bg); border-color: #bfe5d7; }
+.env-mark { font-weight: 800; font-size: .95rem; width: 14px; flex: none; }
+.env-ok .env-mark { color: var(--success); }
+.env-missing .env-mark { color: var(--danger); }
+.env-list code {
+  font-family: var(--mono); font-size: .78rem; background: var(--white);
+  border: 1px solid var(--border); padding: 2px 7px; border-radius: 6px; color: var(--navy-600);
+}
+.env-hint { color: var(--ink-muted); font-size: .78rem; margin-left: auto; }
+
+.setup-steps { margin-top: 22px; padding-left: 20px; display: grid; gap: 9px; font-size: .88rem; color: var(--slate-600); }
+.setup-steps li { line-height: 1.5; }
+.setup-steps b { color: var(--ink); }
+
+@media (max-width: 560px) {
+  .env-hint { margin-left: 0; flex-basis: 100%; }
+}
