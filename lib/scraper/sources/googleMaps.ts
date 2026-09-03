@@ -37,6 +37,11 @@ export interface MapsScrapeOptions {
   maxDetails?: number;
   /** Koliko ankera (kvartova) iz zone obilazimo. */
   maxAnchors?: number;
+  /**
+   * Koliko upita iz paketa koristimo. Pun paket je ~60 upita × 2 ankera = 120
+   * pretraga ≈ 90 minuta. Za probnu turu ovo se seče na 3-5.
+   */
+  maxQueries?: number;
   /** Vremenski budžet — na serverlessu obavezan, inače nas platforma ubije nasred posla. */
   deadline?: Deadline;
 }
@@ -53,7 +58,8 @@ interface CardSnapshot {
 
 export async function scrapeGoogleMaps(page: Page, opts: MapsScrapeOptions): Promise<RawLead[]> {
   const zone = RICH_ZONES[opts.zoneId];
-  const queries = opts.queries ?? buildQueryPack(opts.craft, zone.label);
+  const allQueries = opts.queries ?? buildQueryPack(opts.craft, zone.label);
+  const queries = opts.maxQueries ? allQueries.slice(0, opts.maxQueries) : allQueries;
   const anchors = anchorsFor(opts.zoneId).slice(0, opts.maxAnchors ?? 2);
   const maxPerQuery = opts.maxPerQuery ?? 20;
   const maxDetails = opts.maxDetails ?? 12;

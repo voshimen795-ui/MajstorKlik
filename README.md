@@ -101,8 +101,8 @@ cp .env.example .env.local          # popuni ključeve (vidi ispod)
 # 3. provera da AI radi
 npm run harvest -- --ping
 
-# 4. prva tura, bez upisa u bazu
-npm run harvest -- --craft gipsar --zone Vracar --dry
+# 4. PRVA PROBA — mala tura (~5 min), bez upisa, sa otvorenim prozorom
+npm run harvest -- --craft gipsar --zone Vracar --quick --dry --headful
 
 # 5. dashboard
 npm run dev                          # http://localhost:3000
@@ -209,14 +209,21 @@ najveći bonus (22) i sopstveni izvor (`registarSZ.ts`).
 
 ## 5. Komande
 
+> **Prva tura ide sa `--quick`.** Pun paket je ~60 upita × 2 kvarta = 120 pretraga
+> po ~45s — to je **sat i po po zoni**. `--quick` to seče na 4 upita i 1 kvart
+> (~5 min) da odmah vidiš da li Google servira rezultate ili captchu. CLI pre
+> pokretanja ispiše procenu trajanja.
+
 ```bash
 npm run dev                                          # dashboard, localhost:3000
 npm run build && npm start                           # produkcijski build
 
-npm run harvest -- --craft gipsar --zone Vracar      # jedna tura
+npm run harvest -- --craft gipsar --zone Vracar --quick --dry --headful   # PRVA PROBA, ~5 min
+npm run harvest -- --craft gipsar --zone Vracar      # puna tura (60-90 min po zoni)
 npm run harvest -- --craft moler --zone Dedinje --dry        # bez upisa u bazu
 npm run harvest -- --craft moler --zone Senjak --headful     # gledaš browser uživo
 npm run harvest -- --craft vodoinstalater --zone Dorcol --rules-only  # bez AI-ja
+npm run harvest -- --craft moler --zone Senjak --queries 10 --anchors 1  # ručno seci obim
 npm run harvest -- --plan                            # sve zone × zanat (satima)
 npm run harvest -- --ping                            # samo provera AI provajdera
 

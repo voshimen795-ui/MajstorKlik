@@ -2,6 +2,7 @@
 /**
  * CLI za jednu turu prikupljanja.
  *
+ *   npm run harvest -- --craft gipsar --zone Vracar --quick --dry --headful   # PRVA PROBA, ~5-10 min
  *   npm run harvest -- --craft gipsar --zone Vracar
  *   npm run harvest -- --craft moler --zone Dedinje --dry --headful
  *   npm run harvest -- --plan            # sve zone × svi zanati (dugo traje)
@@ -13,7 +14,7 @@ import { runPipeline, buildDailyPlan } from '../lib/pipeline/runPipeline';
 import { pingAi } from '../lib/ai/aiEngine';
 import { providerStats } from '../lib/ai/router';
 import { isDbConfigured } from '../lib/db/supabase';
-import { RICH_ZONES } from '../lib/config/zones';
+import { RICH_ZONES, resolveZone } from '../lib/config/zones';
 import type { Craft } from '../lib/config/categories';
 import { sleep, randomBetween } from '../lib/utils/rateLimiter';
 
@@ -27,6 +28,9 @@ interface Args {
   ping: boolean;
   minScore?: number;
   maxPerQuery?: number;
+  maxQueries?: number;
+  maxAnchors?: number;
+  quick: boolean;
   sources?: ('google_maps' | 'registar_sz' | 'oglasi')[];
 }
 
@@ -47,6 +51,9 @@ function parseArgs(argv: string[]): Args {
     ping: has('ping'),
     minScore: get('min-score') ? Number(get('min-score')) : undefined,
     maxPerQuery: get('max') ? Number(get('max')) : undefined,
+    maxQueries: get('queries') ? Number(get('queries')) : undefined,
+    maxAnchors: get('anchors') ? Number(get('anchors')) : undefined,
+    quick: has('quick'),
     sources: get('sources')?.split(',') as Args['sources'],
   };
 }
@@ -76,12 +83,40 @@ async function main(): Promise<void> {
     return;
   }
 
+  const CRAFTS: Craft[] = ['vodoinstalater', 'gipsar', 'moler'];
+  if (!CRAFTS.includes(args.craft)) {
+    console.error(`Nepoznat zanat: "${args.craft}". Dozvoljeni: ${CRAFTS.join(' | ')}`);
+    process.exit(1);
+  }
+  if (!args.plan && !resolveZone(args.zone)) {
+    console.error(`Nepoznata zona: "${args.zone}"`);
+    console.error(`\nDostupne zone:`);
+    for (const zone of Object.values(RICH_ZONES)) {
+      console.error(`  ${zone.label.padEnd(28)} ${zone.municipality} · ${zone.tier}`);
+    }
+    console.error(`\nPrihvata se i bez kvačica: Vracar, Dorcol, Savski Venac…`);
+    process.exit(1);
+  }
+
   const jobs = args.plan
     ? buildDailyPlan([args.craft])
     : [{ category: args.craft, rich_zone: args.zone }];
 
+  // --quick: probna tura koja traje 5-10 min umesto 60-90.
+  // Pun paket je ~60 upita × 2 ankera = 120 pretraga po ~45s — to je sat i po.
+  const maxQueries = args.quick ? (args.maxQueries ?? 4) : args.maxQueries;
+  const maxAnchors = args.quick ? (args.maxAnchors ?? 1) : args.maxAnchors;
+  const maxPerQuery = args.quick ? (args.maxPerQuery ?? 8) : args.maxPerQuery;
+
   if (!args.plan) {
-    console.log(`Zanat: ${args.craft} | Zona: ${args.zone} | ${args.dry ? 'DRY RUN' : 'upis u bazu'}\n`);
+    console.log(`Zanat: ${args.craft} | Zona: ${args.zone} | ${args.dry ? 'DRY RUN' : 'upis u bazu'}`);
+    const pretraga = (maxQueries ?? 60) * (maxAnchors ?? 2);
+    const minuta = Math.round((pretraga * 45) / 60);
+    console.log(`Obim: ${pretraga} pretraga × ~45s ≈ ${minuta} min${args.quick ? '  (--quick)' : ''}`);
+    if (!args.quick && pretraga > 40) {
+      console.log('Savet: za prvu probu dodaj --quick (4 upita, 1 kvart, ~5-10 min).');
+    }
+    console.log('');
   } else {
     console.log(`Plan: ${jobs.length} kombinacija (zona × zanat). Ovo traje satima — pusti u pozadini.\n`);
   }
@@ -97,7 +132,9 @@ async function main(): Promise<void> {
         rulesOnly: args.rulesOnly,
         headless: !args.headful,
         minScore: args.minScore,
-        maxPerQuery: args.maxPerQuery,
+        maxPerQuery: maxPerQuery,
+        maxQueries: maxQueries,
+        maxAnchors: maxAnchors,
         sources: args.sources,
         exportJsonDir: process.env.EXPORT_DIR ?? './export',
       });

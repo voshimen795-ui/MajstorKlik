@@ -32,6 +32,10 @@ export interface PipelineParams {
   rulesOnly?: boolean;
   minScore?: number;
   maxPerQuery?: number;
+  /** Koliko upita iz paketa (pun paket ≈ 90 min po zoni; probna tura: 3-5). */
+  maxQueries?: number;
+  /** Koliko kvartova iz zone (probna tura: 1). */
+  maxAnchors?: number;
   maxDetails?: number;
   headless?: boolean;
   /** Snimi rezultat i u JSON fajl (korisno kad Supabase nije podešen). */
@@ -89,6 +93,8 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineRepor
     rich_zone: zoneId,
     sources: params.sources,
     maxPerQuery: params.maxPerQuery,
+    maxQueries: params.maxQueries,
+    maxAnchors: params.maxAnchors,
     maxDetails: params.maxDetails,
     headless: params.headless,
     timeBudgetMs: scrapeBudgetMs,

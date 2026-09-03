@@ -50,6 +50,13 @@ export interface ScrapeParams {
   sources?: ScraperSource[];
   /** Maksimalno rezultata po jednom upitu. */
   maxPerQuery?: number;
+  /**
+   * Koliko upita iz paketa koristimo (pun paket ~60 upita ≈ 90 min po zoni).
+   * Za probnu turu stavi 3-5 i tura traje 5-10 minuta.
+   */
+  maxQueries?: number;
+  /** Koliko kvartova (ankera) iz zone obilazimo. Probna tura: 1. */
+  maxAnchors?: number;
   /** Koliko kartica otvaramo radi telefona. */
   maxDetails?: number;
   /** Sopstvena lista upita umesto automatske. */
@@ -129,6 +136,8 @@ export async function scrape(params: ScrapeParams): Promise<ScrapeResult> {
             zoneId,
             queries: params.queries,
             maxPerQuery: params.maxPerQuery,
+            maxQueries: params.maxQueries,
+            maxAnchors: params.maxAnchors,
             maxDetails: params.maxDetails,
             deadline,
           });
