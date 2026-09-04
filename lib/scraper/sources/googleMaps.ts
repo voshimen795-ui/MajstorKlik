@@ -61,8 +61,11 @@ export async function scrapeGoogleMaps(page: Page, opts: MapsScrapeOptions): Pro
   const allQueries = opts.queries ?? buildQueryPack(opts.craft, zone.label);
   const queries = opts.maxQueries ? allQueries.slice(0, opts.maxQueries) : allQueries;
   const anchors = anchorsFor(opts.zoneId).slice(0, opts.maxAnchors ?? 2);
-  const maxPerQuery = opts.maxPerQuery ?? 20;
-  const maxDetails = opts.maxDetails ?? 12;
+  // Skupljamo tacno onoliko kartica koliko cemo i OTVORITI.
+  // Ranije: 20 skupljeno, 12 otvoreno -> 8 bez telefona -> 8 odbaceno.
+  // Kartica bez telefona ne vredi nista, a kostala je isto vremena.
+  const maxPerQuery = opts.maxPerQuery ?? 12;
+  const maxDetails = opts.maxDetails ?? maxPerQuery;
 
   const results: RawLead[] = [];
   const seenHrefs = new Set<string>();

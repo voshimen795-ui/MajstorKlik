@@ -61,6 +61,8 @@ export interface PipelineReport {
   durationMs: number;
   topLeads: LeadRecord[];
   rejectedSample: { name: string; reason: string }[];
+  /** Odbaceni grupisani po razlogu - pokazuje GDE se gubi prinos. */
+  rejectedReasons: Record<string, number>;
   errors: string[];
   /** Posao prekinut zbog vremenskog budžeta — nije greška, samo kraća tura. */
   stoppedEarly: boolean;
@@ -184,6 +186,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineRepor
     durationMs,
     topLeads: leads.slice(0, 10),
     rejectedSample: rejected.slice(0, 10),
+    rejectedReasons: groupReasons(rejected),
     errors: scrapeResult.errors,
     stoppedEarly: scrapeResult.stoppedEarly || skippedForTime > 0,
     ...(jsonPath ? { jsonPath } : {}),
@@ -217,6 +220,26 @@ export async function qualifyOnly(
 
   const result = await insertLeads(leads);
   return { leads, inserted: result.inserted.length, duplicates: result.duplicates.length, rejected };
+}
+
+/**
+ * Svodi razloge odbacivanja na nekoliko kategorija.
+ * Sirovi tekst nosi brojeve (npr. "skor pravila 26 previse nizak"), pa bi bez
+ * ovoga svaki lead bio svoja kategorija i zbir ne bi znacio nista.
+ */
+function groupReasons(rejected: { name: string; reason: string }[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const { reason } of rejected) {
+    let kategorija = reason;
+    if (reason.includes('telefon')) kategorija = 'nema telefon';
+    else if (reason.includes('konkurencija')) kategorija = 'konkurencija (isti zanat)';
+    else if (reason.includes('van premium zona')) kategorija = 'van premium zona';
+    else if (reason.includes('skor pravila')) kategorija = 'skor pravila prenizak';
+    else if (reason.includes('finalni skor')) kategorija = 'finalni skor ispod praga';
+    else if (reason.startsWith('gre')) kategorija = 'greska u obradi';
+    out[kategorija] = (out[kategorija] ?? 0) + 1;
+  }
+  return out;
 }
 
 async function writeExport(dir: string, fileName: string, content: string): Promise<string> {

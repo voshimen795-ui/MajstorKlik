@@ -30,6 +30,7 @@ interface Args {
   maxPerQuery?: number;
   maxQueries?: number;
   maxAnchors?: number;
+  maxDetails?: number;
   quick: boolean;
   sources?: ('google_maps' | 'registar_sz' | 'oglasi')[];
 }
@@ -52,6 +53,7 @@ function parseArgs(argv: string[]): Args {
     minScore: get('min-score') ? Number(get('min-score')) : undefined,
     maxPerQuery: get('max') ? Number(get('max')) : undefined,
     maxQueries: get('queries') ? Number(get('queries')) : undefined,
+    maxDetails: get('max-details') ? Number(get('max-details')) : undefined,
     maxAnchors: get('anchors') ? Number(get('anchors')) : undefined,
     quick: has('quick'),
     sources: get('sources')?.split(',') as Args['sources'],
@@ -135,6 +137,7 @@ async function main(): Promise<void> {
         maxPerQuery: maxPerQuery,
         maxQueries: maxQueries,
         maxAnchors: maxAnchors,
+        maxDetails: args.maxDetails,
         sources: args.sources,
         exportJsonDir: process.env.EXPORT_DIR ?? './export',
       });
@@ -160,6 +163,22 @@ async function main(): Promise<void> {
         );
         console.log(`\nPrimer poruke (${report.topLeads[0]!.client_name}):\n"${report.topLeads[0]!.cold_pitch_message}"\n`);
       }
+      // Gde se gubi prinos — bez ovoga ne znas sta da podesis posle ture.
+      const razlozi = Object.entries(report.rejectedReasons).sort((a, b) => b[1] - a[1]);
+      if (razlozi.length > 0) {
+        console.log('\nOdbaceno po razlogu:');
+        for (const [razlog, broj] of razlozi) {
+          const procenat = Math.round((broj / report.rejected) * 100);
+          console.log(`   ${String(broj).padStart(4)}  ${String(procenat).padStart(3)}%  ${razlog}`);
+        }
+        if ((report.rejectedReasons['nema telefon'] ?? 0) > report.qualified) {
+          console.log('   → Savet: podigni --max-details ili smanji --max (manje kartica, ali svaka otvorena).');
+        }
+        if ((report.rejectedReasons['skor pravila prenizak'] ?? 0) > report.qualified) {
+          console.log('   → Savet: spusti prag: --min-score 45');
+        }
+      }
+
       if (report.htmlPath) {
         console.log(`\n📱 OTVORI OVO NA TELEFONU (pošalji sebi fajl na WhatsApp/mejl):`);
         console.log(`   ${report.htmlPath}`);
