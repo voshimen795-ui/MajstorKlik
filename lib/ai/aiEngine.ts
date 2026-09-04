@@ -156,17 +156,27 @@ export async function qualifyLead(raw: RawLead, opts: QualifyOptions = {}): Prom
     geo,
     reviewCount: raw.meta?.reviewCount ?? null,
     rating: raw.meta?.rating ?? null,
+    intent: raw.meta?.intent,
+    freshnessDays: raw.meta?.freshnessDays ?? null,
   });
 
   // Rana odbacivanja — ne trošimo AI kvotu na smeće.
-  const competitorHit = isCompetitor([raw.name, raw.rawCategory ?? ''].join(' '), raw.craft);
+  //
+  // PAZI: oglas "Potreban gipsar, Vračar" SADRŽI reč "gipsar" i filter
+  // konkurencije bi ga odbacio kao majstora. Kod potražnje se konkurencija
+  // već proverava kroz classifyIntent (OFFERING se odbaci pre nego što stigne
+  // dovde), pa ovaj filter tu ne sme da radi.
+  const jePotraznja = raw.meta?.intent === 'SEEKING' || raw.source === 'potraznja';
+  const competitorHit = !jePotraznja && isCompetitor([raw.name, raw.rawCategory ?? ''].join(' '), raw.craft);
   if (competitorHit) {
     return { lead: null, rejectedReason: 'konkurencija (isti zanat)', tier: breakdown.tier, usedFallback: false, aiProvider: null };
   }
   if (!phone) {
     return { lead: null, rejectedReason: 'nema upotrebljiv telefon', tier: breakdown.tier, usedFallback: false, aiProvider: null };
   }
-  if (!geo.zone) {
+  // Radar potraznje ne podleze ni geo filteru: covek koji trazi majstora je
+  // posao bez obzira na kvart.
+  if (!geo.zone && !jePotraznja) {
     return { lead: null, rejectedReason: 'van premium zona', tier: breakdown.tier, usedFallback: false, aiProvider: null };
   }
   if (breakdown.total < minScore - 15) {
@@ -235,13 +245,13 @@ export async function qualifyLead(raw: RawLead, opts: QualifyOptions = {}): Prom
   let pitch = verdict?.cold_pitch_message?.trim() || '';
   const pitchIssue = validatePitch(pitch);
   if (pitchIssue && verdict) {
-    pitch = (await repairPitch({ raw, pitch, problem: pitchIssue, zoneLabel: geo.zone.label })) ?? '';
+    pitch = (await repairPitch({ raw, pitch, problem: pitchIssue, zoneLabel: (geo.zone?.label ?? 'Beograd') })) ?? '';
   }
   if (!pitch || validatePitch(pitch)) {
     pitch = fallbackPitch({
       craft: raw.craft,
       clientName: verdict?.client_name || raw.name,
-      zoneLabel: geo.zone.label,
+      zoneLabel: (geo.zone?.label ?? 'Beograd'),
       targetKind,
       urgencyLevel: breakdown.urgencyLevel,
     });
@@ -249,7 +259,7 @@ export async function qualifyLead(raw: RawLead, opts: QualifyOptions = {}): Prom
 
   const clientName = (verdict?.client_name || raw.name).trim();
   const address = (verdict?.address || raw.rawAddress || '').trim();
-  const municipality = resolveMunicipality(verdict?.municipality, geo.zone.municipality);
+  const municipality = resolveMunicipality(verdict?.municipality, (geo.zone?.municipality ?? 'Beograd'));
 
   const whatsappLink = phone.whatsappCapable
     ? buildWaLink(phone.msisdn, opts.prefillWhatsApp === false ? undefined : pitch)
@@ -267,15 +277,15 @@ export async function qualifyLead(raw: RawLead, opts: QualifyOptions = {}): Prom
     whatsapp_link: whatsappLink,
     lead_score: finalScore,
     purchasing_power_tier: tier,
-    reasoning: verdict?.reasoning?.trim() || fallbackReasoning(breakdown, geo.zone.label),
+    reasoning: verdict?.reasoning?.trim() || fallbackReasoning(breakdown, (geo.zone?.label ?? 'Beograd')),
     cold_pitch_message: pitch,
 
     // --- interna polja ---
     craft: raw.craft,
     source: raw.source,
     source_url: raw.sourceUrl,
-    zone_id: geo.zone.id,
-    zone_label: geo.zone.label,
+    zone_id: geo.zone?.id ?? null,
+    zone_label: geo.zone?.label ?? null,
     target_kind: targetKind,
     segment: profile?.segment ?? 'B2B',
     urgency: verdict?.urgency ?? breakdown.urgencyLevel,

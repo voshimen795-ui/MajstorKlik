@@ -25,7 +25,9 @@ const log = createLogger('pipeline');
 export interface PipelineParams {
   category: Craft;
   rich_zone: RichZoneId | string;
-  sources?: ('google_maps' | 'registar_sz' | 'oglasi')[];
+  sources?: ('google_maps' | 'registar_sz' | 'oglasi' | 'potraznja')[];
+  /** Radar potraznje: koliko star oglas jos uzimamo. */
+  freshness?: 'dan' | 'nedelja' | 'mesec' | 'godina' | 'bilo kada';
   /** Ne upisuj u bazu — samo vrati rezultat (za testiranje). */
   dryRun?: boolean;
   /** Preskoči AI (samo pravila) — kad je kvota potrošena. */
@@ -94,6 +96,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineRepor
     category: params.category,
     rich_zone: zoneId,
     sources: params.sources,
+    freshness: params.freshness,
     maxPerQuery: params.maxPerQuery,
     maxQueries: params.maxQueries,
     maxAnchors: params.maxAnchors,
@@ -161,7 +164,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineRepor
   await logHarvestRun({
     craft: params.category,
     zone_id: zoneId,
-    source: (params.sources ?? ['google_maps', 'registar_sz']).join('+'),
+    source: (params.sources ?? ['potraznja', 'google_maps', 'registar_sz']).join('+'),
     started_at: startedIso,
     finished_at: new Date().toISOString(),
     raw_found: scrapeResult.leads.length,

@@ -14,6 +14,7 @@ spremnu za slanje na WhatsApp u jednom kliku.
 2. [Brzi start — 15 minuta](#2-brzi-start--15-minuta)
 3. [Multi-AI routing](#3-multi-ai-routing)
 4. [Geografsko ciljanje i skor](#4-geografsko-ciljanje-i-skor)
+4b. [Radar potražnje](#4b-radar-potražnje--ljudi-koji-već-traže-majstora)
 5. [Komande](#5-komande)
 6. [Struktura koda](#6-struktura-koda)
 7. [Deployment](#7-deployment)
@@ -207,6 +208,70 @@ najveći bonus (22) i sopstveni izvor (`registarSZ.ts`).
 
 ---
 
+## 4b. Radar potražnje — ljudi koji VEĆ traže majstora
+
+Ostatak mašine radi hladan kontakt: nađe firme sa parama, ti ih zoveš. Radar je
+obrnut — traži nekoga ko je **javno napisao da mu treba majstor**. Potreba već
+postoji, ti samo stigneš prvi.
+
+```bash
+npm run harvest -- --craft moler --zone Vracar --demand --freshness nedelja
+```
+
+### Zašto Google veb pretraga, a ne skreperi po oglasnicima
+
+1. **Jedan izvor pokriva sve** — oglasnike, forume, javne objave, portale nabavki.
+   Nema deset skrepera koji svaki mesec pucaju kad neki sajt promeni izgled.
+2. **Google ima filter svežine** (`tbs=qdr:w`). Kod potražnje je to presudno:
+   oglas star mesec dana je posao koji je neko drugi već uzeo.
+3. **Radi bez naloga**, za razliku od Facebook grupa.
+
+Upiti idu pod navodnicima (tačna fraza). To je razlika između 300 reklama
+majstora i 5 pravih poslova. Padeži su razdvojeni jer `"potreban molera"` nije
+srpski i vraća nulu — `potreban` ide sa nominativom, `tražim` sa akuzativom.
+
+### Filter namere — jezgro radara
+
+Na oglasnicima je 9 od 10 rezultata majstor koji reklamira sebe.
+`lib/scoring/intent.ts` to razdvaja pre nego što lead uđe u pipeline:
+
+| Tekst | Presuda |
+|---|---|
+| „Hitno tražim molera za dvosoban na Vračaru" | **SEEKING** — lead |
+| „Molerski radovi, dugogodišnje iskustvo, besplatna procena" | **OFFERING** — konkurencija, napolje |
+| „Stambena zajednica prikuplja ponude za krečenje hodnika" | **SEEKING** — posao sa budžetom |
+| „Gipsarski radovi Beograd" | UNCLEAR — otvara se stranica |
+
+Provera: `npm run intent:test` (19 slučajeva, latinica i ćirilica).
+
+> **Zamka koju je lako propustiti:** oglas „Potreban gipsar, Vračar" sadrži reč
+> „gipsar", pa bi ga filter konkurencije odbacio kao majstora. Zato se kod
+> potražnje taj filter ne primenjuje — nameru već rešava `classifyIntent`.
+
+### Kako se boduje
+
+Potvrđena potražnja nosi **do 30 dodatnih poena**, pa takav lead praktično uvek
+ide na vrh liste. I treba: to je jedina komponenta koja meri stvarnu potrebu, a
+ne pretpostavku. Svežina se dodaje na to (danas +8, do nedelju +5, preko mesec −6).
+
+Dva pravila su ovde ublažena jer bi inače pojela sve leadove:
+
+- **geo filter ne odbacuje potražnju** — čovek koji traži majstora je posao i u
+  Zemunu. Zona i dalje utiče na skor, samo ne na odbacivanje.
+- **filter konkurencije se preskače** (vidi zamku gore).
+
+Izmereno na test podacima: „Potreban gipsar, Vračar, danas" → **97**;
+„javni poziv škole" → **56**; reklama majstora → odbačena.
+
+### Šta radar NE pokriva
+
+**Facebook grupe.** Tu je najveći dnevni promet potražnje u Beogradu
+(„Renoviranje stanova Beograd" i slične), ali Facebook traži login, agresivno
+blokira automatizaciju i banuje naloge. To se realno radi rukom — 10 minuta
+ujutru kroz 4-5 grupa. Ne vredi rizikovati nalog.
+
+---
+
 ## 5. Komande
 
 > **Prva tura ide sa `--quick`.** Pun paket je ~60 upita × 2 kvarta = 120 pretraga
@@ -229,6 +294,8 @@ npm run harvest -- --ping                            # samo provera AI provajder
 
 npm run harvest:loop                                 # kontinualni worker
 npm run phone:test                                   # test parsera telefona
+npm run harvest -- --craft moler --zone Vracar --demand --freshness nedelja  # RADAR POTRAŽNJE
+npm run intent:test                                  # traži vs nudi — 19 slučajeva
 npm run stealth:test                                 # da li maska STVARNO radi u browseru
 SERVERLESS_CHROMIUM=true npm run stealth:test        # isto, ali Lambda Chromium (Vercel put)
 npm run typecheck

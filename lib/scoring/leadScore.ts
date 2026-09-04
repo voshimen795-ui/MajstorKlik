@@ -13,6 +13,10 @@
  *   12  kvalitet kontakta (mobilni > fiksni > bez broja)
  *    8  signali imućnosti u tekstu (lux, penthouse, fine dining…)
  *    3  ozbiljnost firme (broj recenzija — postoji li objekat stvarno)
+ *
+ * Plus 0-30 za POTVRDJENU POTRAZNJU (radar): neko je javno napisao da mu treba
+ * majstor. Zbir se secе na 100, pa takav lead prakticno uvek ide na vrh liste —
+ * i treba, jer je to jedina komponenta koja meri stvarnu potrebu.
  */
 
 import { AFFLUENCE_SIGNALS, CRAFTS, TARGET_BY_KIND, URGENCY_SIGNALS, type Craft, type TargetKind } from '../config/categories';
@@ -33,6 +37,10 @@ export interface ScoreInput {
   geo: GeoMatch;
   reviewCount?: number | null;
   rating?: number | null;
+  /** Radar potraznje: neko je javno trazio majstora. */
+  intent?: 'SEEKING' | 'OFFERING' | 'UNCLEAR';
+  /** Starost objave u danima; sto svezije, to vrednije. */
+  freshnessDays?: number | null;
 }
 
 export interface ScoreBreakdown {
@@ -43,6 +51,8 @@ export interface ScoreBreakdown {
   contact: number;
   affluence: number;
   credibility: number;
+  /** Bonus za potvrdjenu potraznju (0-30). */
+  demand: number;
   urgencyLevel: Urgency;
   tier: PurchasingPowerTier;
   signals: {
@@ -94,7 +104,26 @@ export function scoreLead(input: ScoreInput): ScoreBreakdown {
   const reviews = input.reviewCount ?? 0;
   const credibility = reviews >= 100 ? 3 : reviews >= 25 ? 2 : reviews >= 5 ? 1 : 0;
 
-  const total = clamp(location + targetType + urgency + contact + affluence + credibility, 1, 100);
+  // --- 7. POTVRDJENA POTRAZNJA (0-30) ---
+  // Ovo je jedina komponenta koja meri STVARNU potrebu, a ne pretpostavku.
+  // Neko ko je napisao "trazim gipsara" vredi vise od najbogatijeg kafica
+  // kome mozda ne treba nista — zato bonus nadmasuje i punu lokaciju.
+  let demand = 0;
+  if (input.intent === 'SEEKING') {
+    demand = 22;
+    const dana = input.freshnessDays;
+    if (dana !== null && dana !== undefined) {
+      if (dana <= 1) demand += 8;
+      else if (dana <= 7) demand += 5;
+      else if (dana <= 30) demand += 2;
+      else demand -= 6; // stariji od mesec dana — verovatno vec resen
+    }
+  } else if (input.intent === 'UNCLEAR') {
+    demand = 6;
+  }
+  demand = clamp(demand, 0, 30);
+
+  const total = clamp(location + targetType + urgency + contact + affluence + credibility + demand, 1, 100);
 
   return {
     total,
@@ -104,8 +133,9 @@ export function scoreLead(input: ScoreInput): ScoreBreakdown {
     contact,
     affluence,
     credibility,
+    demand,
     urgencyLevel,
-    tier: deriveTier(input.geo, total),
+    tier: deriveTier(input.geo, total, input.intent === 'SEEKING'),
     signals: {
       urgency: urgencySignals,
       affluence: affluenceSignals,
@@ -127,7 +157,9 @@ function findRejectReason(input: ScoreInput, total: number): string | null {
   if (!input.phone && !haystack.includes('kontakt')) {
     return 'nema upotrebljiv broj telefona';
   }
-  if (!input.geo.zone) {
+  // Potraznja se NE odbacuje zbog zone: neko ko trazi majstora je posao
+  // bez obzira na kvart. Geo i dalje utice na skor, samo ne na odbacivanje.
+  if (!input.geo.zone && input.intent !== 'SEEKING') {
     return 'van ciljanih premium zona';
   }
   if (total < Number(process.env.MIN_LEAD_SCORE ?? 45)) {
@@ -136,8 +168,8 @@ function findRejectReason(input: ScoreInput, total: number): string | null {
   return null;
 }
 
-function deriveTier(geo: GeoMatch, total: number): PurchasingPowerTier {
-  if (!geo.zone) return 'STANDARD';
+function deriveTier(geo: GeoMatch, total: number, isDemand = false): PurchasingPowerTier {
+  if (!geo.zone) return isDemand && total >= 60 ? 'MEDIUM' : 'STANDARD';
   if (geo.zone.tier === 'HIGH' && geo.confidence >= 0.85) return 'HIGH';
   if (geo.zone.tier === 'HIGH' || total >= 70) return total >= 60 ? 'HIGH' : 'MEDIUM';
   if (geo.zone.tier === 'MEDIUM' || total >= 55) return 'MEDIUM';

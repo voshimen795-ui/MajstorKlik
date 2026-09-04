@@ -6,6 +6,7 @@
  *   npm run harvest -- --craft gipsar --zone Vracar
  *   npm run harvest -- --craft moler --zone Dedinje --dry --headful
  *   npm run harvest -- --plan            # sve zone × svi zanati (dugo traje)
+ *   npm run harvest -- --craft moler --zone Vracar --demand --freshness nedelja  # RADAR POTRAZNJE
  *   npm run harvest -- --ping            # samo provera AI provajdera
  */
 
@@ -32,7 +33,9 @@ interface Args {
   maxAnchors?: number;
   maxDetails?: number;
   quick: boolean;
-  sources?: ('google_maps' | 'registar_sz' | 'oglasi')[];
+  demand: boolean;
+  freshness?: 'dan' | 'nedelja' | 'mesec' | 'godina' | 'bilo kada';
+  sources?: ('google_maps' | 'registar_sz' | 'oglasi' | 'potraznja')[];
 }
 
 function parseArgs(argv: string[]): Args {
@@ -56,6 +59,8 @@ function parseArgs(argv: string[]): Args {
     maxDetails: get('max-details') ? Number(get('max-details')) : undefined,
     maxAnchors: get('anchors') ? Number(get('anchors')) : undefined,
     quick: has('quick'),
+    demand: has('demand'),
+    freshness: get('freshness') as Args['freshness'],
     sources: get('sources')?.split(',') as Args['sources'],
   };
 }
@@ -109,14 +114,22 @@ async function main(): Promise<void> {
   const maxQueries = args.quick ? (args.maxQueries ?? 4) : args.maxQueries;
   const maxAnchors = args.quick ? (args.maxAnchors ?? 1) : args.maxAnchors;
   const maxPerQuery = args.quick ? (args.maxPerQuery ?? 8) : args.maxPerQuery;
+  // --demand: iskljucivo radar potraznje (ljudi koji su napisali da im treba majstor)
+  const sources = args.demand ? (['potraznja'] as Args['sources']) : args.sources;
 
   if (!args.plan) {
     console.log(`Zanat: ${args.craft} | Zona: ${args.zone} | ${args.dry ? 'DRY RUN' : 'upis u bazu'}`);
-    const pretraga = (maxQueries ?? 60) * (maxAnchors ?? 2);
-    const minuta = Math.round((pretraga * 45) / 60);
-    console.log(`Obim: ${pretraga} pretraga × ~45s ≈ ${minuta} min${args.quick ? '  (--quick)' : ''}`);
-    if (!args.quick && pretraga > 40) {
-      console.log('Savet: za prvu probu dodaj --quick (4 upita, 1 kvart, ~5-10 min).');
+    if (args.demand) {
+      const upita = maxQueries ?? 10;
+      console.log(`Rezim: RADAR POTRAZNJE — ${upita} upita, svezina: ${args.freshness ?? 'mesec'}`);
+      console.log('Trazimo ljude koji su javno napisali da im treba majstor, ne firme sa parama.');
+    } else {
+      const pretraga = (maxQueries ?? 60) * (maxAnchors ?? 2);
+      const minuta = Math.round((pretraga * 45) / 60);
+      console.log(`Obim: ${pretraga} pretraga × ~45s ≈ ${minuta} min${args.quick ? '  (--quick)' : ''}`);
+      if (!args.quick && pretraga > 40) {
+        console.log('Savet: za prvu probu dodaj --quick (4 upita, 1 kvart, ~5-10 min).');
+      }
     }
     console.log('');
   } else {
@@ -138,7 +151,8 @@ async function main(): Promise<void> {
         maxQueries: maxQueries,
         maxAnchors: maxAnchors,
         maxDetails: args.maxDetails,
-        sources: args.sources,
+        sources: sources,
+        freshness: args.freshness,
         exportJsonDir: process.env.EXPORT_DIR ?? './export',
       });
 

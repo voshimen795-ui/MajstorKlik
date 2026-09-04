@@ -15,6 +15,7 @@ import { createSession, type BrowserSession } from './browser';
 import { scrapeGoogleMaps } from './sources/googleMaps';
 import { scrapeRegistarSZ } from './sources/registarSZ';
 import { scrapeOglasi } from './sources/oglasi';
+import { scrapeDemandRadar } from './sources/demandRadar';
 import { resolveZone, RICH_ZONES, type RichZoneId } from '../config/zones';
 import type { Craft } from '../config/categories';
 import type { RawLead } from '../types/lead';
@@ -41,13 +42,19 @@ export type RichZoneParam =
   | 'Novi Beograd'
   | RichZoneId;
 
-export type ScraperSource = 'google_maps' | 'registar_sz' | 'oglasi';
+export type ScraperSource = 'google_maps' | 'registar_sz' | 'oglasi' | 'potraznja';
 
 export interface ScrapeParams {
   category: Craft;
   rich_zone: RichZoneParam;
-  /** Podrazumevano: Maps + registar stambenih zajednica (oglasi su opt-in). */
+  /**
+   * Podrazumevano: radar potraznje + Maps + registar.
+   * 'potraznja' je prvi jer daje ljude koji VEC traze majstora — to je
+   * neuporedivo vrednije od hladnog kontakta, pa ide dok je budzet pun.
+   */
   sources?: ScraperSource[];
+  /** Koliko star oglas radar jos uzima. */
+  freshness?: 'dan' | 'nedelja' | 'mesec' | 'godina' | 'bilo kada';
   /** Maksimalno rezultata po jednom upitu. */
   maxPerQuery?: number;
   /**
@@ -103,7 +110,7 @@ export async function scrape(params: ScrapeParams): Promise<ScrapeResult> {
   const startedAt = Date.now();
   const zoneId = toZoneId(params.rich_zone);
   const zone = RICH_ZONES[zoneId];
-  const sources = params.sources ?? ['google_maps', 'registar_sz'];
+  const sources = params.sources ?? ['potraznja', 'google_maps', 'registar_sz'];
   const errors: string[] = [];
   const bySource: Record<string, number> = {};
 
@@ -150,6 +157,14 @@ export async function scrape(params: ScrapeParams): Promise<ScrapeResult> {
           });
         } else if (source === 'oglasi') {
           found = await scrapeOglasi(page, { craft: params.category, zoneId, deadline });
+        } else if (source === 'potraznja') {
+          found = await scrapeDemandRadar(page, {
+            craft: params.category,
+            zoneId,
+            freshness: params.freshness,
+            maxQueries: params.maxQueries,
+            deadline,
+          });
         }
 
         bySource[source] = found.length;

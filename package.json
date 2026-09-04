@@ -14,7 +14,8 @@
     "playwright:install": "playwright install --with-deps chromium",
     "stealth:test": "tsx scripts/testStealth.ts",
     "vercel:hobby": "node scripts/setVercelPlan.mjs hobby",
-    "vercel:pro": "node scripts/setVercelPlan.mjs pro"
+    "vercel:pro": "node scripts/setVercelPlan.mjs pro",
+    "intent:test": "tsx scripts/testIntent.ts"
   },
   "dependencies": {
     "@sparticuz/chromium": "131.0.1",

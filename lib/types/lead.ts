@@ -4,7 +4,14 @@ import { z } from 'zod';
 import type { Craft, TargetKind } from '../config/categories';
 import type { PurchasingPowerTier, RichZoneId } from '../config/zones';
 
-export type LeadSource = 'google_maps' | 'registar_sz' | 'oglasi' | 'manual' | 'import';
+export type LeadSource =
+  | 'google_maps'
+  | 'registar_sz'
+  | 'oglasi'
+  /** Radar potraznje: neko je javno napisao da mu treba majstor. */
+  | 'potraznja'
+  | 'manual'
+  | 'import';
 
 /** Ono što skreper izvuče sa stranice — sirovo, neočišćeno. */
 export interface RawLead {
@@ -34,6 +41,12 @@ export interface RawLead {
     priceEur?: number | null;
     areaM2?: number | null;
     listingType?: 'prodaja' | 'izdavanje' | null;
+    /** Radar potraznje: da li objava trazi majstora ili ga nudi. */
+    intent?: 'SEEKING' | 'OFFERING' | 'UNCLEAR';
+    intentScore?: number;
+    /** Koliko je objava stara. Kod potraznje je svezina presudna. */
+    freshnessDays?: number | null;
+    sourceKind?: string;
   };
 }
 
